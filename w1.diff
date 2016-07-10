@@ -1,0 +1,42 @@
+diff -urN linux-4.1.23.orig/drivers/w1/w1_family.h linux-4.1.23/drivers/w1/w1_family.h
+--- linux-4.1.23.orig/drivers/w1/w1_family.h	2016-04-25 17:57:36.000000000 +0200
++++ linux-4.1.23/drivers/w1/w1_family.h	2016-07-08 21:44:18.046301208 +0200
+@@ -31,6 +31,7 @@
+ #define W1_FAMILY_SMEM_01	0x01
+ #define W1_FAMILY_SMEM_81	0x81
+ #define W1_THERM_DS18S20 	0x10
++#define W1_FAMILY_DS28E17	0x19
+ #define W1_FAMILY_DS28E04	0x1C
+ #define W1_COUNTER_DS2423	0x1D
+ #define W1_THERM_DS1822  	0x22
+diff -urN linux-4.1.23.orig/drivers/w1/w1.h linux-4.1.23/drivers/w1/w1.h
+--- linux-4.1.23.orig/drivers/w1/w1.h	2016-04-25 17:57:36.000000000 +0200
++++ linux-4.1.23/drivers/w1/w1.h	2016-07-08 21:44:18.056301208 +0200
+@@ -300,6 +300,7 @@
+ int w1_slave_detach(struct w1_slave *sl);
+ 
+ u8 w1_triplet(struct w1_master *dev, int bdir);
++u8 w1_touch_bit(struct w1_master *dev, int bit);
+ void w1_write_8(struct w1_master *, u8);
+ u8 w1_read_8(struct w1_master *);
+ int w1_reset_bus(struct w1_master *);
+diff -urN linux-4.1.23.orig/drivers/w1/w1_io.c linux-4.1.23/drivers/w1/w1_io.c
+--- linux-4.1.23.orig/drivers/w1/w1_io.c	2016-04-25 17:57:36.000000000 +0200
++++ linux-4.1.23/drivers/w1/w1_io.c	2016-07-08 21:44:18.068301208 +0200
+@@ -66,7 +66,7 @@
+  * @dev:	the master device
+  * @bit:	0 - write a 0, 1 - write a 0 read the level
+  */
+-static u8 w1_touch_bit(struct w1_master *dev, int bit)
++u8 w1_touch_bit(struct w1_master *dev, int bit)
+ {
+ 	if (dev->bus_master->touch_bit)
+ 		return dev->bus_master->touch_bit(dev->bus_master->data, bit);
+@@ -77,6 +77,7 @@
+ 		return 0;
+ 	}
+ }
++EXPORT_SYMBOL_GPL(w1_touch_bit);
+ 
+ /**
+  * w1_write_bit() - Generates a write-0 or write-1 cycle.

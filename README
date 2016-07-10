@@ -1,0 +1,674 @@
+w1_ds28e17 README
+
+This document describes the w1_ds28e17 Linux kernel driver, how to build it,
+how to use it with a DS28E17 chip, what the limitations are.
+
+Author: Jan Kandziora <jjj@gmx.de>
+
+=== Table of Contents
+
+	=== 1  Introduction
+	=== 2  Understanding the DS28E17
+	   --- 2.1  Operation
+	   --- 2.2  Limitations
+	      +++ 2.2.1  Speed
+	      +++ 2.2.2  I2C protocol
+	      +++ 2.2.3  Host adapters
+	   --- 2.3  Interfacing the DS28E17 with a 5V Onewire bus and/or 5V I2C device
+	=== 3  Building the driver
+	   --- 3.1  Obtaining the w1_ds28e17 driver sources
+     --- 3.2  Patching the driver into an existing kernel source tree
+	      +++ 3.2.1  Preparing the kernel sources
+        +++ 3.2.2  Configuring the kernel sources
+				+++ 3.2.3  Rebuilding the "wire" driver module
+				+++ 3.2.4  Building the "w1_ds28e17" driver module
+	      +++ 3.2.5  Installing the "wire" and "w1_ds28e17" driver modules
+				+++ 3.2.6  Building and installing additional driver modules
+				+++ 3.2.7  Updating module dependencies
+	=== 4  Using the driver
+     --- 4.1  Loading the driver
+	      +++ 4.1.1  Driver Parameters
+     --- 4.2  Sysfs properties
+	   --- 4.3  Setting up UDEV
+	   --- 4.4  Playing with the DS28E17 evaluation kit
+	=== 5  Reporting bugs and problems
+	=== 6  License
+
+
+=== 1  Introduction
+
+The Onewire bus is a slow, 15kBaud bus system which can form extensive networks
+of hundreds of metres of a one-wire (plus ground) cable, with dozens of slave
+devices attached to it. Onewire slave devices usually are single chips or small
+circuits only and they are used to monitor temperatures, pressures, battery
+charging, and to control remote single-bit inputs and outputs.
+
+The Linux kernel has a "w1" subsystem which allows to connect various kinds of
+Onewire host adapters to the computer, including the USB-based ds2490, the I2C
+based DS2482 and DS2483 families, and bitbanging the Onewire protocol through a
+single GPIO port. The "w1" subsystem also supports various Onewire slave
+devices such as thermosensor devices, PIO switches and battery monitors. In
+addition, it allows userspace programs such as the "owfs" suite to access and
+control the Onewire and perform more complicated functions.
+
+The DS28E17 is a special Onewire slave device which acts as an I2C master
+residing on the Onewire bus. It "tunnels" I2C through onewire, integrating your
+I2C devices into a Onewire network and thus, allows you to create a "remote I2C
+device" with little effort.
+
+This w1_ds28e17 kernel driver makes all the I2C buses offered by the
+Onewire-attached DS28E17 chips accessible through the usual kernel structures
+and userspace tools. The support is transparent, the new I2C buses aren't much
+different from the ones your computer has built in, apart from some minor
+limitations introduced by the Onewire bus and the DS28E17 itself.
+
+
+=== 2  Understanding the DS28E17 
+
+First, find the authoritative information about the DS28E17 on
+Dallas Semiconductor/Maxim Integrated's website:
+
+https://www.maximintegrated.com/en/products/interface/controllers-expanders/DS28E17.html
+
+
+There's of course more to say about that. There are a lot of pesky details the
+datasheet doesn't describe. And consequences for designing DS28E17 based
+circuits and user software.
+
+
+--- 2.1  Operation
+
+The DS28E17 controls the I2C autonomously, unburdening the host to do so
+itself. This includes Start Condition, slave addressing, sending out the
+buffered data at configured I2C speed, and finally Stop Condition. Same for
+receiving data. It hands over data from one bus to another through a 255 byte
+RAM buffer, first receiving all the data from one side, then sending it on the
+other. During the I2C transfer, the Onewire communication stops and
+vice versa.
+
+A typical transfer is like this:
+-------------------------------------------------------------------------------
+Starting on Onewire. The Onewire host writes the following.
+
+"Bus Reset"                             ____ (480µs low)
+"Presence Pulse"                        ____ (200µs low) (issued by all slaves)
+"Match ROM" bus command                 0x55
+DS28E17 slave address                   0x19 0x00 0x00 0x00 0x02 0xDB 0xD8 0x7B
+"Write Data with Stop" device command   0x4B
+I2C slave address (<<1 | R/-W bit)      0x90 (write to 0x48, a DS7505)
+Write length                            0x03 (register number plus two data bytes)
+Write data                              0x02 0x17 0x00 (DS28E17 buffers this)
+CRC16 (0x4B 0x90 0x03 0x02 0x17 0x00)   0x9E 0x2D (little endian, inverted)
+
+DS28E17 turns over to I2C while Onewire is left high. All the following is sent
+by the DS28E17 autonomously. The host driver in the meantime does a usleep,
+calculated from the I2C bus speed and number of bytes to send/receive on I2C.
+After that lower bound, it actively monitors the Onewire line for end of
+transfer condition.
+
+Start condition                         SDA goes low while SCL is high
+I2C slave address (<<1 | R/-W bit)      0x90 (write to 0x48, a DS7505)
+Write data                              0x02 0x17 0x00
+Stop condition                          SDA goes high while SCL is high
+
+DS28E17 waits for a read time slot from the Onewire host to signal the end of
+I2C transfer. After that, the Onewire host then reads the following from the
+DS28E17.
+
+Transfer status                         0x00 (ok)
+Unacknowledged writes                   0x00 (none, ok)
+
+End of Onewire transfer. Onewire stays high until next "Bus Reset".
+-------------------------------------------------------------------------------
+
+
+--- 2.2  Limitations
+
++++ 2.2.1  Speed
+
+First thing you have to understand is Onewire is designed to be a *reliable but
+slow* bus system. It only has a bit rate of approximately 15kBaud. Though the
+DS28E17 supports the Onewire "overdrive" mode (roughly 77kBaud), the kernel's
+"w1" subsystem doesn't and that "overdrive" mode only works reliably with very
+small Onewire networks, rendering it pretty much useless for creating "remote
+I2C slave devices". So, take it as set you have to stick to 15kBaud speed. In
+addition to this, you can see from the above there is a lot of protocol
+overhead on the Onewire side.
+
+To transfer 3 bytes to an I2C slave —which could be done in 60µs on a host
+connected 400kBaud I2C— you need about 11,000µs on the DS28E17. (It would
+be still 2,200µs at the unimplemented overdrive speed.)
+
+It should be clear that this is only acceptable for small data amounts such as
+coming from temperature and pressure sensors or seldomly accessed devices such
+as remote single-bit inputs and outputs driving switches, solenoids and such.
+For bigger amounts of data like reading a kilobyte chunk of data stored in a
+1Mbit I2C eeprom M24M01 you need a different solution (but then, accessing it
+in small chunks may be sufficient for your application.)
+
+Placing another DS2482 (or DS2483) I2C to Onewire host adapter chip behind a
+DS28E17 is, while technically possible, unadviseable for the same reason. The
+protocol overhead doesn't double but it is squared!
+
+You should also recognize the Onewire protocol requires the host to process
+a lot of data in a timely manner. Using a ds2490 based host adapter offloads
+that and will improve your host's overall performance, while using a simple
+GPIO for bitbanging the Onewire protocol will create a lot of interrupts and/or
+busy looping and thus, load.
+
+
++++ 2.2.2  I2C protocol
+
+The second limitation is about the I2C protocol the DS28E17 is able to produce.
+It does so autonomously and there is no way to produce arbitrary I2C protocol
+elements, let alone SDA/SCL signal combinations with the DS28E17.
+
+The DS28E17 is able to produce the following I2C sequences:
+-------------------------------------------------------------------------------
+Write Data with Stop:      S Addr Wr [A]  Data [A] Data [A] ... [A] Data  [A] P
+Write Data no Stop:        S Addr Wr [A]  Data [A] Data [A] ... [A] Data  [A]
+Write Data only:                          Data [A] Data [A] ... [A] Data  [A]
+Write Data only with Stop:                Data [A] Data [A] ... [A] Data  [A] P
+Read Data with Stop:       S Addr Rd [A] [Data] A [Data] A  ...  A [Data] NA  P
+
+Key to symbols
+
+S     (1 bit) : Start bit
+P     (1 bit) : Stop bit
+Rd/Wr (1 bit) : Read/Write bit. Rd equals 1, Wr equals 0.
+A, NA (1 bit) : Accept and reverse accept bit.
+Addr  (7 bits): I2C 7 bit address. Note that this can be expanded as usual to
+                get a 10 bit I2C address.
+[..]: Data sent by I2C device, as opposed to data sent by the host adapter.
+-------------------------------------------------------------------------------
+This list is exhaustive. The amount of data sent or received with one Onewire
+command is limited to 1..255 bytes. For the read sequences, the amount of data
+to be read from the I2C slave device must be determined by the host. 
+
+(For the curious: the DS28E17 also has a combined command "Write, Read Data
+with Stop" which produces less Onewire protocol overhead than the equivalent
+"Write Data no Stop", "Read Data with Stop" sequence. The w1_ds28e17 driver
+uses that special command automatically when possible.)
+
+
+This puts three further limitations to the I2C and SMBus on the DS28E17:
+
+There is no "Read Data without Stop". So, there isn't a way to receive more
+than 255 bytes in one transaction. The w1_ds28e17 driver ends the current
+transaction with -EIO on an attempt to read more than 255 bytes.
+
+Neither is there a way to turn around from read to write in one transaction.
+The w1_ds28e17 driver issues a normal "Read Data with Stop", "Write Data" ...
+sequence in that case. This should be fine when no other master operates on the
+same I2C bus as the DS28E17.
+
+Another limitation is the missing "Read Data only". The Onewire host always has
+to announce the number of bytes to read from the I2C slave device in advance.
+The w1_ds28e17 driver issues a normal one byte "Read Data with Stop", followed
+by a "Read Data with Stop" with the number of bytes to read taken from the data
+byte read in the first. Again, this should be fine when no other master
+operates on the same I2C bus as the DS28E17.
+
+
++++ 2.2.3  Host adapters
+
+The kernel's w1 subsystem only supports a small selection of available Onewire
+host adapters. Most prominently, DS2480B and LINK based adapters are NOT
+SUPPORTED, neither are ethernet based ones.
+
+That's a pity, even the current evaluation kits from Maxim feature
+such an unsupported DS2480B based adapter.
+
+
+--- 2.3  Interfacing the DS28E17 with a 5V onewire bus and/or 5V I2C device
+
+IMPORTANT! The DS28E17 is a 3.3V device. It isn't 5V tolerant. When you hook it
+up to a 5V circuit it seems to be but once you accidentally lift the Vdd line
+while the IO line is still attached, it's fried. Been there, seen that. [-_-;]
+
+
+If you have to interface a 5V bus line to the DS28E17 (likely), use this
+level-shifter circuit:
+
+|
+|        +5V ----.           ,-----+---- +3.3V
+|                |           |     |
+|                \         G |     \
+|                /      –––––'     /
+|                \    ––– – –––    \
+|                |     |  ^  |     |  
+| 5V bus line ---+-----'  '--+-----+---- 3.3V bus line
+|                      D     S
+|                        
+
+The transistor is a small signal N-channel enhancement mode MOSFET, e.g. a
+2N7000, BS170 or MMBF170. The value of the two pullup resistors depend on the
+pullup current you need, 1.5kΩ to 4.7kΩ is okay for most cases.
+
+Use this circuit on both the SDA and SCL pin of the DS28E17 if you have to
+interface 5V I2C devices (but check if they are 3.3V compliant first, many
+are.)
+
+Use this circuit on the IO pin of the DS28E17 when you have to interface a
+standard 5V Onewire bus as with ds2490, ds2482, and ds2483 based host adapters
+for example. You can leave out the 5V pullup in that case, there is one built
+into the Onewire host adapter.
+
+
+=== 3  Building the driver
+
+Building the w1_ds28e17 driver unfortunately is *not* straightforward, as the
+w1 subsystem needs to be patched to expose a function needed for operating the
+DS28E17. It is still easy however.
+
+
+--- 3.1  Obtaining the w1_ds28e17 driver sources
+
+Get the w1_ds28e17 driver source archive from github.
+
+[~]$ wget https://github.com/ianka/w1_ds28e17/archive/master.tar.gz -O w1_ds28e17.tar.gz
+
+Unpack the driver sources into your home directory.
+
+[~]$ tar -xf w1_ds28e17.tar.gz
+
+
+--- 3.2  Patching into a kernel source tree
+
++++ 3.2.1  Preparing the kernel sources
+
+First, you need matching kernel sources, the gcc compiler suite, make,
+ncurses-devel etc. Read the manual of your Linux distribution on how to set all
+this up. Assumed you have the kernel sources of your current kernel unpacked
+at ~/linux-4.1.23/ and want to build the w1_ds28e17 driver for the running
+kernel, do
+
+[~]$ cd ~/linux-4.1.23
+
+First you have to patch the existing "wire" driver sources inside your kernel
+source tree.
+
+[~/linux-4.1.23]$ patch -p1 <~/w1_ds28e17-master/w1.diff
+
+Next step is to patch the Kconfig and Makefile inside drivers/w1/slaves to
+enable the config options and build of the w1_ds28e17 driver.
+
+[~/linux-4.1.23]$ patch -p1 <~/w1_ds28e17-master/Kconfig.diff
+[~/linux-4.1.23]$ patch -p1 <~/w1_ds28e17-master/Makefile.diff
+
+Last step is to copy the w1_ds28e17 driver source file into the kernel tree.
+
+[~/linux-4.1.23]$ cp ~/w1_ds28e17-master/w1_ds28e17.c drivers/w1/slaves/
+
+When all this succeeded you can configure the kernel sources.
+
+
++++ 3.2.2  Configuring the kernel sources
+
+Start with the configuration of the running kernel.
+
+[~/linux-4.1.23]$ zcat /proc/config.gz >.config
+
+NOTICE: when you don't want to rebuild your whole kernel, make sure you aren't
+turning anything from < > to <*>, <M> to <*> or vice versa. The only allowed
+change is from < > to <M> then. Please note when "Device Drivers->Dallas's
+1-wire support" was <*> at the very beginning, you have to rebuild your whole
+kernel, install the new image it and reboot. That is because the basic "wire"
+driver has to be patched for the "w1_ds28e17" driver to work.
+
+Start the ncurses based configuration program.
+
+[~/linux-4.1.23]$ make menuconfig
+
+Check "Device Drivers->I2C Support". If you want your new DS28E17 based I2C
+bus to be accessible from user space (likely), you also have to check "Device
+Drivers->I2C Support->I2C device interface". 
+
+Check "Device Drivers->Dallas's 1-wire support".You may want "Device
+Drivers->Dallas's 1-wire support->Userspace communication over connector" to be
+switched on for making userspace tools like owfs to be able to access the
+kernel's w1 subsystem.
+
+Switch on "Device Drivers->Dallas's 1-wire support->1-wire Bus Masters" and the
+host adapter you have:
+
+Matrox G400           - unlikely you have this
+DS2490 USB            - sold as DS9490 (blue conish USB plug)
+Maxim DS2482          - for DS2483, too
+Maxim DS1WM           - unlikely you have this
+GPIO 1-wire busmaster - depends on "Device Drivers->GPIO support"
+
+Switch on "Device Drivers->Dallas's 1-wire support->1-wire slaves
+->1-wire-to-I2C master bridge (DS28E17)". This is the actual w1_ds28e17 driver.
+
+Remember which modules you had to switch on, as you have to build and install
+them later, too. Exit to top level and save your current kernel configuration
+to ".config".
+
+
++++ 3.2.3  Rebuilding the "wire" driver module.
+
+As written, the w1_ds28e17 driver needs another symbol to be exported from the
+kernel's "wire" module. That is why you have to patch it (done above) and
+rebuild it before building the actual w1_ds28e17 driver module you want.
+
+
+NOTICE: You can always rebuild the whole kernel, and modules by doing
+"make bzImage && make modules && make modules_install", and install and run
+that. The following is just a shortcut procedure.
+
+
+Prepare your kernel sources for rebuilding the modules. Build the wire.ko
+module a first time to get the symversion line of the new w1_touch_bit symbol.
+
+[~/linux-4.1.23]$ make modules_prepare
+[~/linux-4.1.23]$ make drivers/w1/wire.ko
+[~/linux-4.1.23]$ grep w1_touch_bit Module.symvers >Module.symvers.w1_touch_bit
+
+Now rebuild wire.ko including both the default Module.symvers and the new
+Module.symvers.w1_touch_bit. Most distributions save the Modules.symvers file
+of their default kernel at the /boot directory. Look for that file if the zcat
+line below fails.
+
+[~/linux-4.1.23]$ zcat /boot/symvers-$(uname -r).gz | cat - Module.symvers.w1_touch_bit >Module.symvers
+[~/linux-4.1.23]$ make SUBDIRS=drivers/w1 wire.ko
+
+
++++ 3.2.4  Building the "w1_ds28e17" driver module
+
+From what you have prepared until now, building the w1_ds28e17 module finally
+*is* straightforward. \[o_o]/
+
+[~/linux-4.1.23]$ make SUBDIRS=drivers/w1/slaves w1_ds28e17.ko
+
+
++++ 3.2.5  Installing the "wire" and "w1_ds28e17" driver modules
+
+Finally copy them to a location where the module tools can find them
+
+[~/linux-4.1.23]$ sudo cp drivers/w1/wire.ko /lib/modules/$(uname -r)/kernel/drivers/w1/
+[~/linux-4.1.23]$ sudo cp drivers/w1/slaves/w1_ds28e17.ko /lib/modules/$(uname -r)/kernel/drivers/w1/slaves/
+
+
+IMPORTANT: *NEVER* use "make modules_install" when you followed these shortcut
+instructions. That is because "make modules_install" will then *remove* all the
+modules from /lib/modules/... but "wire" and "w1_ds28e17". If you do that, most
+likely your system will not boot anymore.
+
+
++++ 3.2.6  Installing additional driver modules
+
+This is straightforward as with the "w1_ds28e17" driver.
+ 
+If you had to select the i2c subsystem, you now have to build and install the
+driver modules selected.
+
+[~/linux-4.1.23]$ make SUBDIRS=drivers/i2c i2c-core.ko i2c-dev.ko
+[~/linux-4.1.23]$ sudo cp drivers/i2c/*.ko /lib/modules/$(uname -r)/kernel/drivers/i2c
+
+If you had to select a Onewire host adapter driver, you now have to build and
+install the driver modules selected.
+
+[~/linux-4.1.23]$ make SUBDIRS=drivers/w1/masters
+[~/linux-4.1.23]$ sudo cp drivers/w1/masters/*.ko /lib/modules/$(uname -r)/kernel/drivers/w1/masters
+
+
++++ 3.2.7  Updating module dependencies
+
+A last step, you have to refresh the module dependencies file to make
+"modprobe" work as expected.
+
+[~/linux-4.1.23]$ sudo depmod -A
+
+
+
+  _̣*_
+\[o_o]/  Finally done with building and installing!
+  [:]    You can use the driver now.
+  / \
+
+
+
+=== 4  Using the driver
+
+--- 4.1  Loading the drivers
+
+Please note nothing about the Onewire subsystem is autoloaded when you plug in
+a device. You have to load the necessary drivers by hand.
+
+First, load the "w1_ds28e17" driver module. This automatically loads the "wire"
+and "i2c-core" drivers (the latter only if it's not built-in, which often is
+the case.)
+
+# modprobe w1_ds28e17
+
+Then load a Onewire host adapter driver. If you have a DS9490R host adapter (the
+blue conish usb plug), "ds2490" is the driver you need.
+
+# modprobe ds2490
+
+If you want to have userspace applications access the I2C devices connected to
+your DS28E17 (likely), you need the "i2c-dev" driver, too.
+
+# modprobe i2c-dev
+
+Check the kernel log with 
+
+# dmesg | tail
+...
+usbcore: registered new interface driver DS9490R
+w1_slave_driver 19-00000002dbd8: i2c speed set to 400 kBaud.
+i2c /dev entries driver
+#
+
+All fine!
+
+
++++ 4.1.1  Driver Parameters
+
+The "w1_ds28e17" driver has three global parameters, which can be passed from
+the module tools (insmod command line or /etc/modprobe.d/ files) or the kernel
+command line. These are:
+
+repeated_start:
+	This sets up the default "repeated start" flag for freshly connected DS28E17
+	devices. The DS28E17 can produce Repeated Start Conditions in a number of
+	situations. However, there are I2C slave devices which don't handle Repeated
+	Start Conditions gracefully, e.g. the DS7505 from the DS28E17 evaluation kit.
+
+	As the DS28E17 is hardly met in a multi-master I2C environment, the Repeated
+	Start Condition can be disabled completely. If so, it is replaced by a Stop
+	condition followed by a normal Start Condition. Please note the combined
+	write/read transfer the DS28E17 offers relies on the Repeated Start
+	Condition, so it is replaced by two simple transfers automatically by the
+	w1_ds28e17 driver, should it be disabled.
+
+	Valid values are 0 (disabled) and 1 (enabled). The default is 0.
+
+speed:
+	This sets up the default I2C speed a DS28E17 get configured for as soon
+	it is connected. 0 means 100kBaud, 1 means 400kBaud, 2 means 900kBaud and any
+	other value from 3..255 means "do not set on connect". The power-on default
+	of the DS28E17 is 400kBaud, but chips may come and go on the Onewire bus
+	without being de-powered and as soon the "w1_ds28e17" driver notices a
+	freshly connected, or reconnected DS28E17 device on the Onewire bus, it will
+	re-apply this setting.
+
+	The default is 1.
+
+stretch:
+	This sets up the default stretch value used for freshly connected DS28E17
+	devices. It is a multiplier used on the calculation of the busy wait time
+	for an I2C transfer. This is to account for I2C slave devices which make
+	heavy use of the I2C clock stretching feature and thus, the needed timeout
+	cannot be pre-calculated correctly. As the w1_ds28e17 driver checks the
+	DS28E17's busy flag in a loop after the precalculated wait time, it should be
+	hardly needed to tweak this setting.
+	
+	Leave it at 1 unless you get EIO errors and a "w1_slave_driver
+	19-00000002dbd8: busy timeout" in the kernel log.
+
+	Valid values are 1 to 9. The default is 1.
+
+Setting up parameters with insmod:
+
+# insmod /lib/modules/$(uname -r)/kernel/drivers/w1/slaves/w1_ds28e17 repeated_start=1 speed=0
+Setting up parameters for use with modprobe: create a file in /etc/modprobe.d/ containing
+
+options w1_ds28e17 repeated_start=1 speed=0
+
+Setting up parameters on the kernel command line (boot options).
+
+... w1_ds28e17.repeated_start=1 w1_ds28e17.speed=0 ...
+
+
+--- 4.2  Sysfs properties
+
+The kernel's w1 subsystem automatically creates a device subdirectory for any
+Onewire slave connected to a host adaptor.
+
+If your DS28E17 isn't detected in an instant, initiate a search by hand, then
+reset to the default continous search.
+
+# echo  1 >/sys/bus/w1/devices/w1_bus_master1/w1_master_search
+# echo -1 >/sys/bus/w1/devices/w1_bus_master1/w1_master_search
+
+For details, see Documentation/w1/w1.generic inside the kernel source tree.
+
+# ls -l /sys/bus/w1/devices
+total 0
+lrwxrwxrwx 1 root root 0 Jul  9 20:03 19-00000002dbd8 -> ../../../devices/w1_bus_master1/19-00000002dbd8
+lrwxrwxrwx 1 root root 0 Jul  9 20:03 81-0000002ce7cf -> ../../../devices/w1_bus_master1/81-0000002ce7cf
+lrwxrwxrwx 1 root root 0 Jul  9 20:03 w1_bus_master1 -> ../../../devices/w1_bus_master1
+
+The 19-nnn subdirectory contains the sysfs subtree of your DS28E17.
+
+# ls -l /sys/bus/w1/devices/19-00000002dbd8/
+total 0
+lrwxrwxrwx 1 root root    0 Jul  9 20:03 driver -> ../../../bus/w1/drivers/w1_slave_driver
+drwxr-xr-x 4 root root    0 Jul  9 20:03 i2c-5
+-r--r--r-- 1 root root 4096 Jul  9 20:03 id
+-r--r--r-- 1 root root 4096 Jul  9 20:03 name
+drwxr-xr-x 2 root root    0 Jul  9 20:03 power
+-rw-r--r-- 1 root root 4096 Jul  9 20:03 repeated_start
+-rw-r--r-- 1 root root 4096 Jul  9 20:03 speed
+-rw-r--r-- 1 root root 4096 Jul  9 20:03 stretch
+lrwxrwxrwx 1 root root    0 Jul  9 20:03 subsystem -> ../../../bus/w1
+-rw-r--r-- 1 root root 4096 Jul  9 20:03 uevent
+
+driver, id, name, power, subsystem, and uevent are standard sysfs properties.
+
+The repeated_start, speed and stretch values are the current settings of the
+parameters described at section 4.1.1  Driver Parameters. You can tweak them
+individually for each DS28E17.
+
+i2c-5 is the name of the associated I2C master device node. If your udev daemon
+is set up to handle I2C buses (likely), you can find the DS28E17 I2C bus char
+device node at /dev/i2c-5 in that case. If you have more than one DS28E17
+connected to your Onewire bus, each one gets its own char device node. Values
+aren't fixed but may be enumerated differently between reboot, so it's
+necessary to check for the actual char device name in this directory.
+
+Or set up udev to create stable symlinks for each DS28E17 in your Onewire
+network.
+
+
+--- 4.3  Setting up UDEV
+
+Create a file /etc/udev/rules.d/91-ds28e17.rules as follows:
+-------------------------------------------------------------------------------
+SUBSYSTEM=="i2c-dev", KERNEL=="i2c-[0-9]*", ATTRS{name}=="w1-19-*", \
+        SYMLINK+="i2c-$attr{name}"
+-------------------------------------------------------------------------------
+
+Then reload the udev rules.
+
+# udevadm control -R
+
+After de-registering your DS28E17
+
+# echo 19-00000002dbd8 >/sys/bus/w1/devices/w1_bus_master1/w1_master_remove
+
+and initiating a search by hand, then resetting to the default continous search,
+
+# echo  1 >/sys/bus/w1/devices/w1_bus_master1/w1_master_search
+# echo -1 >/sys/bus/w1/devices/w1_bus_master1/w1_master_search
+
+you get a nice, stable symlink
+
+# ls -l /dev/i2c-*
+crw------- 1 root root 89, 0 Jul  9 20:03 /dev/i2c-0
+crw------- 1 root root 89, 1 Jul  9 20:03 /dev/i2c-1
+crw------- 1 root root 89, 2 Jul  9 20:03 /dev/i2c-2
+crw------- 1 root root 89, 3 Jul  9 20:03 /dev/i2c-3
+crw------- 1 root root 89, 4 Jul  9 20:03 /dev/i2c-4
+crw------- 1 root root 89, 5 Jul  9 23:24 /dev/i2c-5
+lrwxrwxrwx 1 root root     5 Jul  9 23:24 /dev/i2c-w1-19-00000002dbd8 -> i2c-5
+
+which is created from the factory id number of the DS28E17.
+
+
+--- 4.4  Playing with the DS28E17 evaluation kit
+
+The DS28E17 evaluation kit as offered from Maxim has a DS7505 I2C temperature
+sensor chip on the same board as the DS28E17. You can play with that chip to
+get a feeling how to deal with the DS28E17 and I2C. There are some sample
+userspace test programs for the DS7505 chip in the driver source directory. 
+
+[~]$ cd w1_ds28e17-master
+[~/w1_ds28e17-master]$ make
+...
+[~/w1_ds28e17-master]$ sudo ./ds7505-readtemp /dev/i2c-w1-19-00000002dbd8 0x48
+22.500
+
+Touch the chip, the temperature should increase.
+
+[~/w1_ds28e17-master]$ sudo ./ds7505-readtemp /dev/i2c-w1-19-00000002dbd8 0x48
+23.5000
+
+Set up higher resolution and the thermostat trip points.
+
+[~/w1_ds28e17-master]$ sudo ./ds7505-configure /dev/i2c-w1-19-00000002dbd8 0x48 0x60 24.5 23.0
+
+Read configuration.
+
+[~/w1_ds28e17-master]$ sudo ./ds7505-readconfig /dev/i2c-w1-19-00000002dbd8 0x48
+0x60 24.5000 23.0000
+
+Recall the configuration from EEPROM.
+
+[~/w1_ds28e17-master]$ sudo ./ds7505-recall /dev/i2c-w1-19-00000002dbd8 0x48
+[~/w1_ds28e17-master]$ sudo ./ds7505-readconfig /dev/i2c-w1-19-00000002dbd8 0x48
+0x00 80.0000 75.0000
+
+Change configuration again, store into EEPROM, reset, change, recall.
+
+[~/w1_ds28e17-master]$ sudo ./ds7505-configure /dev/i2c-w1-19-00000002dbd8 0x48 0x60 24.5 23.0
+[~/w1_ds28e17-master]$ sudo ./ds7505-store /dev/i2c-w1-19-00000002dbd8 0x48
+[~/w1_ds28e17-master]$ sudo ./ds7505-reset /dev/i2c-w1-19-00000002dbd8 0x48
+[~/w1_ds28e17-master]$ sudo ./ds7505-readconfig /dev/i2c-w1-19-00000002dbd8 0x48
+0x60 24.5000 23.0000
+[~/w1_ds28e17-master]$ sudo ./ds7505-configure /dev/i2c-w1-19-00000002dbd8 0x48 0x40 55 -10
+[~/w1_ds28e17-master]$ sudo ./ds7505-readconfig /dev/i2c-w1-19-00000002dbd8 0x48
+0x40 55.0000 -10.0000
+[~/w1_ds28e17-master]$ sudo ./ds7505-recall /dev/i2c-w1-19-00000002dbd8 0x48
+[~/w1_ds28e17-master]$ sudo ./ds7505-readconfig /dev/i2c-w1-19-00000002dbd8 0x48
+0x60 24.5000 23.0000
+
+
+=== 5  Reporting bugs and problems
+
+There is not bounty on bugs but I think you are still as happy as I am to have
+them fixed. So, if you encounter a bug, please report it.
+
+If you encounter problems with building or using the w1_ds28e17 or the ds7505-*
+test programs, feel free to contact me by email to jjj@gmx.de. Please provide
+as much information as you can about your problem.
+
+
+=== 6  License
+
+The w1_ds28e17 Linux kernel driver is free software, written and copyrighted by
+Jan Kandziora <jjj@gmx.de>. You may use, distribute and modify it under the
+terms of the attached GPLv2 license. See the file COPYING for details.
+
