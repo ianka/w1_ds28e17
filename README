@@ -17,18 +17,18 @@ Author: Jan Kandziora <jjj@gmx.de>
 	   --- 2.3  Interfacing the DS28E17 with a 5V Onewire bus and/or 5V I2C device
 	=== 3  Building the driver
 	   --- 3.1  Obtaining the w1_ds28e17 driver sources
-     --- 3.2  Patching the driver into an existing kernel source tree
+	   --- 3.2  Patching the driver into an existing kernel source tree
 	      +++ 3.2.1  Preparing the kernel sources
-        +++ 3.2.2  Configuring the kernel sources
-				+++ 3.2.3  Rebuilding the "wire" driver module
-				+++ 3.2.4  Building the "w1_ds28e17" driver module
+	      +++ 3.2.2  Configuring the kernel sources
+	      +++ 3.2.3  Rebuilding the "wire" driver module
+	      +++ 3.2.4  Building the "w1_ds28e17" driver module
 	      +++ 3.2.5  Installing the "wire" and "w1_ds28e17" driver modules
-				+++ 3.2.6  Building and installing additional driver modules
-				+++ 3.2.7  Updating module dependencies
+	      +++ 3.2.6  Building and installing additional driver modules
+	      +++ 3.2.7  Updating module dependencies
 	=== 4  Using the driver
-     --- 4.1  Loading the driver
+	   --- 4.1  Loading the driver
 	      +++ 4.1.1  Driver Parameters
-     --- 4.2  Sysfs properties
+	   --- 4.2  Sysfs properties
 	   --- 4.3  Setting up UDEV
 	   --- 4.4  Playing with the DS28E17 evaluation kit
 	=== 5  Reporting bugs and problems
