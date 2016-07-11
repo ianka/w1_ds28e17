@@ -36,6 +36,10 @@ int main(int argc, char* argv[]) {
 
 	/* Open I2C device. */
 	fd = open(argv[1], O_RDWR);
+	if (fd < 0) {
+		perror("ds7505-reset: i2c device open");
+		return 2;
+	}
 
 	/* Setup reset command. */
 	i2c_msgs[0].addr   = address;

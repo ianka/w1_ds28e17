@@ -35,6 +35,10 @@ int main(int argc, char* argv[]) {
 
 	/* Open I2C device. */
 	fd = open(argv[1], O_RDWR);
+	if (fd < 0) {
+		perror("ds7505-recall: i2c device open");
+		return 2;
+	}
 
 	/* Setup recall command. */
 	i2c_msgs[0].addr   = address;
