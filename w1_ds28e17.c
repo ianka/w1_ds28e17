@@ -189,10 +189,6 @@ static int w1_f19_i2c_write(struct w1_slave *sl, u16 i2c_address,
 			|| count == 0)
 		return 0;
 
-	/* Select DS28E17. */
-	if (w1_reset_select_slave(sl))
-		return -ENXIO;
-
 	/* Check whether we need multiple commands. */
 	if (count <= W1_F19_WRITE_DATA_LIMIT) {
 		/* Small data amount. Data can be sent with
@@ -263,10 +259,6 @@ static int w1_f19_i2c_read(struct w1_slave *sl, u16 i2c_address,
 			|| count == 0)
 		return -EINVAL;
 
-	/* Select DS28E17. */
-	if (w1_reset_select_slave(sl))
-		return -ENXIO;
-
 	/* Send command to DS28E17. */
 	w1_buf[0] = W1_F19_READ_DATA_WITH_STOP;
 	w1_buf[1] = i2c_address << 1 | 0x01;
@@ -313,10 +305,6 @@ static int w1_f19_i2c_write_read(struct w1_slave *sl, u16 i2c_address,
 			|| rcount > W1_F19_READ_DATA_LIMIT
 			|| rcount == 0)
 		return -EINVAL;
-
-	/* Select DS28E17. */
-	if (w1_reset_select_slave(sl))
-		return -ENXIO;
 
 	/* Send command and I2C data to DS28E17. */
 	w1_buf[0] = W1_F19_WRITE_READ_DATA_WITH_STOP;
@@ -371,8 +359,18 @@ static int w1_f19_i2c_master_transfer(struct i2c_adapter *adapter,
 	int i = 0;
 	int result = 0;
 
+	/* Return if no messages to send/receive. */
+	if (num == 0)
+		return 0;
+
 	/* Start onewire transaction. */
 	mutex_lock(&sl->master->bus_mutex);
+
+	/* Select DS28E17. */
+	if (w1_reset_select_slave(sl)) {
+		i = -ENXIO;
+		goto error;
+	}	
 
 	/* Loop while there are still messages to transfer. */
 	while (i < num) {
@@ -455,6 +453,15 @@ static int w1_f19_i2c_master_transfer(struct i2c_adapter *adapter,
 
 		/* Next message. */
 		i++;
+
+		/* Are there still messages to send/receive? */
+		if (i < num) {
+			/* Yes. Resume to same DS28E17. */
+			if (w1_reset_resume_command(sl->master)) {
+				i = -ENXIO;
+				goto error;
+			}	
+		}
 	}
 
 error:
