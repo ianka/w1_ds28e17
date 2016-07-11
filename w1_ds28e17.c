@@ -477,8 +477,18 @@ error:
 static u32 w1_f19_i2c_functionality(struct i2c_adapter *adapter)
 {
 	/* Plain I2C functions only.
-	 * SMBus is emulated by the kernel's I2C layer. */
-	return I2C_FUNC_I2C;
+	 * SMBus is emulated by the kernel's I2C layer.
+	 * No "I2C_FUNC_SMBUS_QUICK"
+	 * No "I2C_FUNC_SMBUS_READ_BLOCK_DATA"
+	 * No "I2C_FUNC_SMBUS_BLOCK_PROC_CALL" */
+	return I2C_FUNC_I2C |
+		I2C_FUNC_SMBUS_BYTE |
+		I2C_FUNC_SMBUS_BYTE_DATA |
+		I2C_FUNC_SMBUS_WORD_DATA |
+		I2C_FUNC_SMBUS_PROC_CALL |
+		I2C_FUNC_SMBUS_WRITE_BLOCK_DATA |
+		I2C_FUNC_SMBUS_I2C_BLOCK |
+		I2C_FUNC_SMBUS_PEC;
 }
 
 /* I2C algorithm. */
