@@ -42,8 +42,9 @@ static char i2c_stretch = 1;
 module_param_named(stretch, i2c_stretch, byte, (S_IRUSR | S_IWUSR));
 
 /* Default I2C repeated start value to be set when a DS28E17 is detected. */
-static bool i2c_repeated_start = 0;
-module_param_named(repeated_start, i2c_repeated_start, bool, (S_IRUSR | S_IWUSR));
+static bool i2c_repeated_start;
+module_param_named(repeated_start, i2c_repeated_start, bool,
+	(S_IRUSR | S_IWUSR));
 
 
 /* DS28E17 device command codes. */
@@ -63,14 +64,15 @@ module_param_named(repeated_start, i2c_repeated_start, bool, (S_IRUSR | S_IWUSR)
 #define W1_F19_STATUS_ADDRESS 0x02
 #define W1_F19_STATUS_START   0x08
 
-/* Maximum number of I2C bytes to transfer within one CRC16 protected onewire command. */
+/* Maximum number of I2C bytes to transfer within one CRC16 protected onewire
+ * command. */
 #define W1_F19_WRITE_DATA_LIMIT 255
 
 /* Maximum number of I2C bytes to read with one onewire command. */
 #define W1_F19_READ_DATA_LIMIT 255
 
 /* Contants for calculating the busy sleep. */
-#define W1_F19_BUSY_TIMEBASES { 90, 23, 10 } 
+#define W1_F19_BUSY_TIMEBASES { 90, 23, 10 }
 #define W1_F19_BUSY_GRATUITY  1000
 
 /* Number of checks for the busy flag before timeout. */
@@ -101,7 +103,8 @@ static int w1_f19_i2c_busy_wait(struct w1_slave *sl, size_t count)
 	 * as we have to wait at least this time for all
 	 * the I2C bytes at the given speed to be transferred.*/
 	usleep_range(timebases[data->speed] * (data->stretch) * count,
-	             timebases[data->speed] * (data->stretch) * count + W1_F19_BUSY_GRATUITY );
+		timebases[data->speed] * (data->stretch) * count
+		+ W1_F19_BUSY_GRATUITY);
 
 	/* Now continusly check the busy flag sent by the DS28E17. */
 	checks = W1_F19_BUSY_CHECKS;
@@ -109,7 +112,7 @@ static int w1_f19_i2c_busy_wait(struct w1_slave *sl, size_t count)
 		/* Return success if the busy flag is cleared. */
 		if (w1_touch_bit(sl->master, 1) == 0)
 			return 0;
-		
+
 		/* Wait one non-streched byte timeslot. */
 		udelay(timebases[data->speed]);
 	}
@@ -122,8 +125,8 @@ static int w1_f19_i2c_busy_wait(struct w1_slave *sl, size_t count)
 
 /* Utility function: write data to I2C slave, single chunk. */
 static int __w1_f19_i2c_write(struct w1_slave *sl,
-                              const u8 *command, size_t command_count,
-                              const u8 *buffer, size_t count)
+	const u8 *command, size_t command_count,
+	const u8 *buffer, size_t count)
 {
 	u16 crc;
 	u8 w1_buf[2];
@@ -157,20 +160,24 @@ static int __w1_f19_i2c_write(struct w1_slave *sl,
 		dev_warn(&sl->dev, "i2c device not responding.\n");
 	if (w1_buf[0] & W1_F19_STATUS_START)
 		dev_warn(&sl->dev, "i2c start condition invalid.\n");
-	if ((w1_buf[0] & (W1_F19_STATUS_CRC | W1_F19_STATUS_ADDRESS)) == 0 && w1_buf[1] != 0)
-		dev_warn(&sl->dev, "i2c short write, %d bytes not acknowledged.\n", w1_buf[1]);
+	if ((w1_buf[0] & (W1_F19_STATUS_CRC | W1_F19_STATUS_ADDRESS)) == 0
+			&& w1_buf[1] != 0) {
+		dev_warn(&sl->dev, "i2c short write, %d bytes not acknowledged.\n",
+			w1_buf[1]);
+	}
 
 	/* Check error conditions. */
 	if (w1_buf[0] != 0 || w1_buf[1] != 0)
 		return -EIO;
 
 	/* All ok. */
-	return count;	
+	return count;
 }
 
 
 /* Write data to I2C slave. */
-static int w1_f19_i2c_write(struct w1_slave *sl, u16 i2c_address, const u8 *buffer, size_t count, bool stop)
+static int w1_f19_i2c_write(struct w1_slave *sl, u16 i2c_address,
+	const u8 *buffer, size_t count, bool stop)
 {
 	int result;
 	int remaining = count;
@@ -188,10 +195,12 @@ static int w1_f19_i2c_write(struct w1_slave *sl, u16 i2c_address, const u8 *buff
 
 	/* Check whether we need multiple commands. */
 	if (count <= W1_F19_WRITE_DATA_LIMIT) {
-		/* Small data amount. Data can be sent with a single onewire command. */
+		/* Small data amount. Data can be sent with
+		 * a single onewire command. */
 
 		/* Send all data to DS28E17. */
-		command[0] = (stop ? W1_F19_WRITE_DATA_WITH_STOP : W1_F19_WRITE_DATA_NO_STOP);
+		command[0] = (stop ? W1_F19_WRITE_DATA_WITH_STOP
+			: W1_F19_WRITE_DATA_NO_STOP);
 		command[1] = i2c_address << 1;
 		result = __w1_f19_i2c_write(sl, command, 2, buffer, count);
 	} else {
@@ -201,7 +210,9 @@ static int w1_f19_i2c_write(struct w1_slave *sl, u16 i2c_address, const u8 *buff
 		p = buffer;
 		command[0] = W1_F19_WRITE_DATA_NO_STOP;
 		command[1] = i2c_address << 1;
-		if ((result = __w1_f19_i2c_write(sl, command, 2, p, W1_F19_WRITE_DATA_LIMIT)) < 0)
+		result = __w1_f19_i2c_write(sl, command, 2, p,
+			W1_F19_WRITE_DATA_LIMIT);
+		if (result < 0)
 			return result;
 
 		/* Resume to same DS28E17. */
@@ -215,7 +226,9 @@ static int w1_f19_i2c_write(struct w1_slave *sl, u16 i2c_address, const u8 *buff
 		while (remaining > W1_F19_WRITE_DATA_LIMIT) {
 			/* Send intermediate chunk to DS28E17. */
 			command[0] = W1_F19_WRITE_DATA_ONLY;
-			if ((result = __w1_f19_i2c_write(sl, command, 1, p, W1_F19_WRITE_DATA_LIMIT)) < 0)
+			result = __w1_f19_i2c_write(sl, command, 1, p,
+					W1_F19_WRITE_DATA_LIMIT);
+			if (result < 0)
 				return result;
 
 			/* Resume to same DS28E17. */
@@ -228,16 +241,18 @@ static int w1_f19_i2c_write(struct w1_slave *sl, u16 i2c_address, const u8 *buff
 		}
 
 		/* Send final chunk to DS28E17. */
-		command[0] = (stop ? W1_F19_WRITE_DATA_ONLY_WITH_STOP : W1_F19_WRITE_DATA_ONLY);
+		command[0] = (stop ? W1_F19_WRITE_DATA_ONLY_WITH_STOP
+			: W1_F19_WRITE_DATA_ONLY);
 		result = __w1_f19_i2c_write(sl, command, 1, p, remaining);
 	}
-	
+
 	return result;
 }
 
 
 /* Read data from I2C slave. */
-static int w1_f19_i2c_read(struct w1_slave *sl, u16 i2c_address, u8 *buffer, size_t count)
+static int w1_f19_i2c_read(struct w1_slave *sl, u16 i2c_address,
+	u8 *buffer, size_t count)
 {
 	u16 crc;
 	u8 w1_buf[5];
@@ -287,8 +302,7 @@ static int w1_f19_i2c_read(struct w1_slave *sl, u16 i2c_address, u8 *buffer, siz
 
 /* Write to, then read data from I2C slave. */
 static int w1_f19_i2c_write_read(struct w1_slave *sl, u16 i2c_address,
-                                 const u8 *wbuffer, size_t wcount,
-																       u8 *rbuffer, size_t rcount)
+	const u8 *wbuffer, size_t wcount, u8 *rbuffer, size_t rcount)
 {
 	u16 crc;
 	u8 w1_buf[3];
@@ -333,8 +347,11 @@ static int w1_f19_i2c_write_read(struct w1_slave *sl, u16 i2c_address,
 		dev_warn(&sl->dev, "i2c device not responding.\n");
 	if (w1_buf[0] & W1_F19_STATUS_START)
 		dev_warn(&sl->dev, "i2c start condition invalid.\n");
-	if ((w1_buf[0] & (W1_F19_STATUS_CRC | W1_F19_STATUS_ADDRESS)) == 0 && w1_buf[1] != 0)
-		dev_warn(&sl->dev, "i2c short write, %d bytes not acknowledged.\n", w1_buf[1]);
+	if ((w1_buf[0] & (W1_F19_STATUS_CRC | W1_F19_STATUS_ADDRESS)) == 0
+			&& w1_buf[1] != 0) {
+		dev_warn(&sl->dev, "i2c short write, %d bytes not acknowledged.\n",
+			w1_buf[1]);
+	}
 
 	/* Check error conditions. */
 	if (w1_buf[0] != 0 || w1_buf[1] != 0)
@@ -346,9 +363,10 @@ static int w1_f19_i2c_write_read(struct w1_slave *sl, u16 i2c_address,
 
 
 /* Do an I2C master transfer. */
-static int w1_f19_i2c_master_transfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num)
+static int w1_f19_i2c_master_transfer(struct i2c_adapter *adapter,
+	struct i2c_msg *msgs, int num)
 {
-	struct w1_slave *sl = (struct w1_slave *) adapter->algo_data; 
+	struct w1_slave *sl = (struct w1_slave *) adapter->algo_data;
 	struct w1_f19_data *config = sl->family_data;
 	int i = 0;
 	int result = 0;
@@ -358,25 +376,32 @@ static int w1_f19_i2c_master_transfer(struct i2c_adapter *adapter, struct i2c_ms
 
 	/* Loop while there are still messages to transfer. */
 	while (i < num) {
-		/* Check for special case: Small write followed by read to same I2C device. */
+		/* Check for special case: Small write followed
+		 * by read to same I2C device. */
 		if (config->repeated_start
 			&& i < (num-1)
 			&& msgs[i].addr == msgs[i+1].addr
 			&& !(msgs[i].flags & I2C_M_RD)
 			&& (msgs[i+1].flags & I2C_M_RD)
 			&& (msgs[i].len <= W1_F19_WRITE_DATA_LIMIT)) {
-			/* The DS28E17 has a combined transfer for small write+read. */
-			if ((result = w1_f19_i2c_write_read(sl, msgs[i].addr,
-					msgs[i].buf, msgs[i].len, msgs[i+1].buf, msgs[i+1].len)) < 0) {
+			/* The DS28E17 has a combined transfer
+			 * for small write+read. */
+			result = w1_f19_i2c_write_read(sl, msgs[i].addr,
+				msgs[i].buf, msgs[i].len,
+				msgs[i+1].buf, msgs[i+1].len);
+			if (result < 0) {
 				i = result;
 				goto error;
 			}
 
-			/* Check if we should interpret the read data as a length byte.
-			 * The DS28E17 unfortunately has no read without stop, so we
-			 * can just do another simple read in that case. */
+			/* Check if we should interpret the read data
+			 * as a length byte. The DS28E17 unfortunately
+			 * has no read without stop, so we can just do
+			 * another simple read in that case. */
 			if (msgs[i+1].flags & I2C_M_RECV_LEN) {
-				if ((result = w1_f19_i2c_read(sl, msgs[i+1].addr, &(msgs[i+1].buf[1]), msgs[i+1].buf[0])) < 0) {
+				result = w1_f19_i2c_read(sl, msgs[i+1].addr,
+					&(msgs[i+1].buf[1]), msgs[i+1].buf[0]);
+				if (result < 0) {
 					i = result;
 					goto error;
 				}
@@ -388,25 +413,40 @@ static int w1_f19_i2c_master_transfer(struct i2c_adapter *adapter, struct i2c_ms
 			/* Simple transfers. */
 			if (msgs[i].flags & I2C_M_RD) {
 				/* Read transfer. */
-				if ((result = w1_f19_i2c_read(sl, msgs[i].addr, msgs[i].buf, msgs[i].len)) < 0) {
+				result = w1_f19_i2c_read(sl, msgs[i].addr,
+					msgs[i].buf, msgs[i].len);
+				if (result < 0) {
 					i = result;
 					goto error;
 				}
 
-				/* Check if we should interpret the read data as a length byte.
-				 * The DS28E17 unfortunately has no read without stop, so we
-				 * can just do another simple read in that case. */
+				/* Check if we should interpret the read data
+				 * as a length byte. The DS28E17 unfortunately
+				 * has no read without stop, so we can just do
+				 * another simple read in that case. */
 				if (msgs[i].flags & I2C_M_RECV_LEN) {
-					if ((result = w1_f19_i2c_read(sl, msgs[i].addr, &(msgs[i].buf[1]), msgs[i].buf[0])) < 0) {
+					result = w1_f19_i2c_read(sl,
+						msgs[i].addr,
+						&(msgs[i].buf[1]),
+						msgs[i].buf[0]);
+					if (result < 0) {
 						i = result;
 						goto error;
 					}
 				}
 			}	else {
 				/* Write transfer.
-				 * If repeated start is allowed by configuration: stop condition only for last transfer. */
-				if ((result = w1_f19_i2c_write(sl, msgs[i].addr, msgs[i].buf, msgs[i].len,
-						!(config->repeated_start && i != (num-1)))) < 0) {
+				 * If repeated start is allowed by
+				 * configuration:
+				 * stop condition only for last
+				 * transfer. */
+				result = w1_f19_i2c_write(sl,
+					msgs[i].addr,
+					msgs[i].buf,
+					msgs[i].len,
+					!(config->repeated_start
+						&& i != (num-1)));
+				if (result < 0) {
 					i = result;
 					goto error;
 				}
@@ -461,8 +501,8 @@ static int w1_f19_get_i2c_speed(struct w1_slave *sl)
 	if (result < 0 || result > 2) {
 		result = -EIO;
 		goto error;
-	}	
-	
+	}
+
 	/* Update speed in slave specific data. */
 	data->speed = result;
 
@@ -524,7 +564,8 @@ static ssize_t speed_show(struct device *dev, struct device_attribute *attr,
 	int result;
 
 	/* Read current speed from slave. Updates data->speed. */
-	if ((result = w1_f19_get_i2c_speed(sl)) < 0)
+	result = w1_f19_get_i2c_speed(sl);
+	if (result < 0)
 		return result;
 
 	/* Return current speed value. */
@@ -544,9 +585,10 @@ static ssize_t speed_store(struct device *dev, struct device_attribute *attr,
 		return -EINVAL;
 	if (buf[0] != '0' && buf[0] != '1' && buf[0] != '2')
 		return -EINVAL;
-	
+
 	/* Set speed on slave. */
-	if ((error = w1_f19_set_i2c_speed(sl, buf[0] & 0x03)) < 0)
+	error = w1_f19_set_i2c_speed(sl, buf[0] & 0x03);
+	if (error < 0)
 		return error;
 
 	/* Return bytes written. */
@@ -580,7 +622,7 @@ static ssize_t stretch_store(struct device *dev, struct device_attribute *attr,
 		return -EINVAL;
 	if (buf[0] < '1' || buf[0] > '9')
 		return -EINVAL;
-	
+
 	/* Set busy stretch value. */
 	data->stretch = buf[0] & 0x0F;
 
@@ -592,8 +634,8 @@ static DEVICE_ATTR_RW(stretch);
 
 
 /* Repeated start attribute for a single chip. */
-static ssize_t repeated_start_show(struct device *dev, struct device_attribute *attr,
-			     char *buf)
+static ssize_t repeated_start_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
 {
 	struct w1_slave *sl = dev_to_w1_slave(dev);
 	struct w1_f19_data *data = sl->family_data;
@@ -602,8 +644,8 @@ static ssize_t repeated_start_show(struct device *dev, struct device_attribute *
 	return sprintf(buf, "%d\n", data->repeated_start);
 }
 
-static ssize_t repeated_start_store(struct device *dev, struct device_attribute *attr,
-			      const char *buf, size_t count)
+static ssize_t repeated_start_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct w1_slave *sl = dev_to_w1_slave(dev);
 	struct w1_f19_data *data = sl->family_data;
@@ -615,7 +657,7 @@ static ssize_t repeated_start_store(struct device *dev, struct device_attribute 
 		return -EINVAL;
 	if (buf[0] < '0' || buf[0] > '1')
 		return -EINVAL;
-	
+
 	/* Set repeated start value. */
 	data->repeated_start = buf[0] & 0x01;
 
@@ -665,18 +707,19 @@ static int w1_f19_add_slave(struct w1_slave *sl)
 		data->speed = 1;
 	}
 
-	/* Setup default busy stretch, and repeated start configuration for the DS28E17. */
+	/* Setup default busy stretch, and repeated start
+	 * configuration for the DS28E17. */
 	data->stretch        = i2c_stretch;
 	data->repeated_start = i2c_repeated_start;
 
 	/* Setup I2C adapter. */
 	data->adapter.owner      = THIS_MODULE;
 	data->adapter.class      = 0;
-  data->adapter.algo       = &w1_f19_i2c_algorithm;
-  data->adapter.algo_data  = (void *) sl;
+	data->adapter.algo       = &w1_f19_i2c_algorithm;
+	data->adapter.algo_data  = (void *) sl;
 	strcpy(data->adapter.name, "w1-");
 	strcat(data->adapter.name, sl->name);
-  data->adapter.dev.parent = &sl->dev;
+	data->adapter.dev.parent = &sl->dev;
 
 	return i2c_add_adapter(&data->adapter);
 }
