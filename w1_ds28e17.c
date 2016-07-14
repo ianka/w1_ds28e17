@@ -41,12 +41,6 @@ module_param_named(speed, i2c_speed, byte, (S_IRUSR | S_IWUSR));
 static char i2c_stretch = 1;
 module_param_named(stretch, i2c_stretch, byte, (S_IRUSR | S_IWUSR));
 
-/* Default I2C repeated start value to be set when a DS28E17 is detected. */
-static bool i2c_repeated_start;
-module_param_named(repeated_start, i2c_repeated_start, bool,
-	(S_IRUSR | S_IWUSR));
-
-
 /* DS28E17 device command codes. */
 #define W1_F19_WRITE_DATA_WITH_STOP      0x4B
 #define W1_F19_WRITE_DATA_NO_STOP        0x5A
@@ -83,7 +77,6 @@ module_param_named(repeated_start, i2c_repeated_start, bool,
 struct w1_f19_data {
 	u8 speed;
 	u8 stretch;
-	u8 repeated_start;
 	struct i2c_adapter adapter;
 };
 
@@ -311,6 +304,7 @@ static int w1_f19_i2c_write_read(struct w1_slave *sl, u16 i2c_address,
 	w1_buf[1] = i2c_address << 1;
 	w1_buf[2] = wcount;
 	crc = crc16(CRC16_INIT, w1_buf, 3);
+	w1_write_block(sl->master, w1_buf, 3);
 
 	crc = crc16(crc, wbuffer, wcount);
 	w1_write_block(sl->master, wbuffer, wcount);
@@ -355,7 +349,6 @@ static int w1_f19_i2c_master_transfer(struct i2c_adapter *adapter,
 	struct i2c_msg *msgs, int num)
 {
 	struct w1_slave *sl = (struct w1_slave *) adapter->algo_data;
-	struct w1_f19_data *config = sl->family_data;
 	int i = 0;
 	int result = 0;
 
@@ -376,8 +369,7 @@ static int w1_f19_i2c_master_transfer(struct i2c_adapter *adapter,
 	while (i < num) {
 		/* Check for special case: Small write followed
 		 * by read to same I2C device. */
-		if (config->repeated_start
-			&& i < (num-1)
+		if (i < (num-1)
 			&& msgs[i].addr == msgs[i+1].addr
 			&& !(msgs[i].flags & I2C_M_RD)
 			&& (msgs[i+1].flags & I2C_M_RD)
@@ -434,16 +426,13 @@ static int w1_f19_i2c_master_transfer(struct i2c_adapter *adapter,
 				}
 			}	else {
 				/* Write transfer.
-				 * If repeated start is allowed by
-				 * configuration:
-				 * stop condition only for last
+				 * Stop condition only for last
 				 * transfer. */
 				result = w1_f19_i2c_write(sl,
 					msgs[i].addr,
 					msgs[i].buf,
 					msgs[i].len,
-					!(config->repeated_start
-						&& i != (num-1)));
+					i == (num-1));
 				if (result < 0) {
 					i = result;
 					goto error;
@@ -650,46 +639,10 @@ static ssize_t stretch_store(struct device *dev, struct device_attribute *attr,
 static DEVICE_ATTR_RW(stretch);
 
 
-/* Repeated start attribute for a single chip. */
-static ssize_t repeated_start_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	struct w1_slave *sl = dev_to_w1_slave(dev);
-	struct w1_f19_data *data = sl->family_data;
-
-	/* Return current repeated start value. */
-	return sprintf(buf, "%d\n", data->repeated_start);
-}
-
-static ssize_t repeated_start_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count)
-{
-	struct w1_slave *sl = dev_to_w1_slave(dev);
-	struct w1_f19_data *data = sl->family_data;
-
-	/* Valid values are '0' and '1' */
-	if (count < 1 || count > 2 || !buf)
-		return -EINVAL;
-	if (count == 2 && buf[1] != '\n')
-		return -EINVAL;
-	if (buf[0] < '0' || buf[0] > '1')
-		return -EINVAL;
-
-	/* Set repeated start value. */
-	data->repeated_start = buf[0] & 0x01;
-
-	/* Return bytes written. */
-	return count;
-}
-
-static DEVICE_ATTR_RW(repeated_start);
-
-
 /* All attributes. */
 static struct attribute *w1_f19_attrs[] = {
 	&dev_attr_speed.attr,
 	&dev_attr_stretch.attr,
-	&dev_attr_repeated_start.attr,
 	NULL,
 };
 
@@ -724,10 +677,9 @@ static int w1_f19_add_slave(struct w1_slave *sl)
 		data->speed = 1;
 	}
 
-	/* Setup default busy stretch, and repeated start
+	/* Setup default busy stretch
 	 * configuration for the DS28E17. */
 	data->stretch        = i2c_stretch;
-	data->repeated_start = i2c_repeated_start;
 
 	/* Setup I2C adapter. */
 	data->adapter.owner      = THIS_MODULE;

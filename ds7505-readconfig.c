@@ -17,7 +17,7 @@
 #include <linux/i2c-dev.h>
 
 int main(int argc, char* argv[]) {
-	struct i2c_msg i2c_msgs[1];
+	struct i2c_msg i2c_msgs[2];
 	struct i2c_rdwr_ioctl_data i2c_transfer;
 	unsigned int address;
 	uint8_t config[1]; 
@@ -43,94 +43,57 @@ int main(int argc, char* argv[]) {
 		return 2;
 	}
 
-	/* Select config register. */
+	/* Config read. */
 	i2c_msgs[0].addr   = address;
 	i2c_msgs[0].flags  = 0;
 	i2c_msgs[0].len    = 1;
 	i2c_msgs[0].buf    = "\x01";
 
-	i2c_transfer.msgs  = i2c_msgs;
-	i2c_transfer.nmsgs = 1;
-
-	if (ioctl(fd, I2C_RDWR, &i2c_transfer) < 0) {
-		perror("ds7505-readconfig: i2c config select");
-		return 2;
-	};
-
-	/* This is done in two separate transfers to ensure there is no repeated
-	 * start condition, as the DS7505 doesn't support that. */
-
-	/* Config read. */
-	i2c_msgs[0].addr   = address;
-	i2c_msgs[0].flags  = I2C_M_RD;
-	i2c_msgs[0].len    = 1;
-	i2c_msgs[0].buf    = (char*)&config;
+	i2c_msgs[1].addr   = address;
+	i2c_msgs[1].flags  = I2C_M_RD;
+	i2c_msgs[1].len    = 1;
+	i2c_msgs[1].buf    = (char*)&config;
 
 	i2c_transfer.msgs  = i2c_msgs;
-	i2c_transfer.nmsgs = 1;
+	i2c_transfer.nmsgs = 2;
 
 	if (ioctl(fd, I2C_RDWR, &i2c_transfer) < 0) {
 		perror("ds7505-readconfig: i2c config read");
 		return 2;
 	};
 
-	/* Select t_os register. */
+	/* t_os read. */
 	i2c_msgs[0].addr   = address;
 	i2c_msgs[0].flags  = 0;
 	i2c_msgs[0].len    = 1;
 	i2c_msgs[0].buf    = "\x03";
 
-	i2c_transfer.msgs  = i2c_msgs;
-	i2c_transfer.nmsgs = 1;
-
-	if (ioctl(fd, I2C_RDWR, &i2c_transfer) < 0) {
-		perror("ds7505-readconfig: i2c t_os select");
-		return 2;
-	};
-
-	/* This is done in two separate transfers to ensure there is no repeated
-	 * start condition, as the DS7505 doesn't support that. */
-
-	/* t_os read. */
-	i2c_msgs[0].addr   = address;
-	i2c_msgs[0].flags  = I2C_M_RD;
-	i2c_msgs[0].len    = 2;
-	i2c_msgs[0].buf    = (char*)&tos;
+	i2c_msgs[1].addr   = address;
+	i2c_msgs[1].flags  = I2C_M_RD;
+	i2c_msgs[1].len    = 2;
+	i2c_msgs[1].buf    = (char*)&tos;
 
 	i2c_transfer.msgs  = i2c_msgs;
-	i2c_transfer.nmsgs = 1;
+	i2c_transfer.nmsgs = 2;
 
 	if (ioctl(fd, I2C_RDWR, &i2c_transfer) < 0) {
 		perror("ds7505-readconfig: i2c t_os read");
 		return 2;
 	};
 
-
-	/* Select t_hyst register. */
+	/* t_hyst read. */
 	i2c_msgs[0].addr   = address;
 	i2c_msgs[0].flags  = 0;
 	i2c_msgs[0].len    = 1;
 	i2c_msgs[0].buf    = "\x02";
 
-	i2c_transfer.msgs  = i2c_msgs;
-	i2c_transfer.nmsgs = 1;
-
-	if (ioctl(fd, I2C_RDWR, &i2c_transfer) < 0) {
-		perror("ds7505-readconfig: i2c t_hyst select");
-		return 2;
-	};
-
-	/* This is done in two separate transfers to ensure there is no repeated
-	 * start condition, as the DS7505 doesn't support that. */
-
-	/* t_hyst read. */
-	i2c_msgs[0].addr   = address;
-	i2c_msgs[0].flags  = I2C_M_RD;
-	i2c_msgs[0].len    = 2;
-	i2c_msgs[0].buf    = (char*)&thyst;
+	i2c_msgs[1].addr   = address;
+	i2c_msgs[1].flags  = I2C_M_RD;
+	i2c_msgs[1].len    = 2;
+	i2c_msgs[1].buf    = (char*)&thyst;
 
 	i2c_transfer.msgs  = i2c_msgs;
-	i2c_transfer.nmsgs = 1;
+	i2c_transfer.nmsgs = 2;
 
 	if (ioctl(fd, I2C_RDWR, &i2c_transfer) < 0) {
 		perror("ds7505-readconfig: i2c t_hyst read");

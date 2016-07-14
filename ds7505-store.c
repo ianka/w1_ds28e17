@@ -17,7 +17,7 @@
 #include <linux/i2c-dev.h>
 
 int main(int argc, char* argv[]) {
-	struct i2c_msg i2c_msgs[1];
+	struct i2c_msg i2c_msgs[2];
 	struct i2c_rdwr_ioctl_data i2c_transfer;
 	unsigned int address;
 	uint8_t config[1]; 
@@ -57,31 +57,19 @@ int main(int argc, char* argv[]) {
 
 	/* Loop until EEPROM has been written. */
 	do {
-		/* Select config register. */
+		/* Config read. */
 		i2c_msgs[0].addr   = address;
 		i2c_msgs[0].flags  = 0;
 		i2c_msgs[0].len    = 1;
 		i2c_msgs[0].buf    = "\x01";
 
-		i2c_transfer.msgs  = i2c_msgs;
-		i2c_transfer.nmsgs = 1;
-
-		if (ioctl(fd, I2C_RDWR, &i2c_transfer) < 0) {
-			perror("ds7505-store: i2c config read");
-			return 2;
-		};
-
-		/* This is done in two separate transfers to ensure there is no repeated
-		 * start condition, as the DS7505 doesn't support that. */
-
-		/* Config read. */
-		i2c_msgs[0].addr   = address;
-		i2c_msgs[0].flags  = I2C_M_RD;
-		i2c_msgs[0].len    = 1;
-		i2c_msgs[0].buf    = (char*)&config;
+		i2c_msgs[1].addr   = address;
+		i2c_msgs[1].flags  = I2C_M_RD;
+		i2c_msgs[1].len    = 1;
+		i2c_msgs[1].buf    = (char*)&config;
 
 		i2c_transfer.msgs  = i2c_msgs;
-		i2c_transfer.nmsgs = 1;
+		i2c_transfer.nmsgs = 2;
 
 		if (ioctl(fd, I2C_RDWR, &i2c_transfer) < 0) {
 			perror("ds7505-readtemp: i2c config read");

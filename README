@@ -470,21 +470,6 @@ The "w1_ds28e17" driver has three global parameters, which can be passed from
 the module tools (insmod command line or /etc/modprobe.d/ files) or the kernel
 command line. These are:
 
-repeated_start:
-	This sets up the default "repeated start" flag for freshly connected DS28E17
-	devices. The DS28E17 can produce Repeated Start Conditions in a number of
-	situations. However, there are I2C slave devices which don't handle Repeated
-	Start Conditions gracefully, e.g. the DS7505 from the DS28E17 evaluation kit.
-
-	As the DS28E17 is hardly met in a multi-master I2C environment, the Repeated
-	Start Condition can be disabled completely. If so, it is replaced by a Stop
-	condition followed by a normal Start Condition. Please note the combined
-	write/read transfer the DS28E17 offers relies on the Repeated Start
-	Condition, so it is replaced by two simple transfers automatically by the
-	w1_ds28e17 driver, should it be disabled.
-
-	Valid values are 0 (disabled) and 1 (enabled). The default is 0.
-
 speed:
 	This sets up the default I2C speed a DS28E17 get configured for as soon
 	it is connected. 0 means 100kBaud, 1 means 400kBaud, 2 means 900kBaud and any
@@ -512,14 +497,14 @@ stretch:
 
 Setting up parameters with insmod:
 
-# insmod /lib/modules/$(uname -r)/kernel/drivers/w1/slaves/w1_ds28e17 repeated_start=1 speed=0
+# insmod /lib/modules/$(uname -r)/kernel/drivers/w1/slaves/w1_ds28e17 speed=0
 Setting up parameters for use with modprobe: create a file in /etc/modprobe.d/ containing
 
-options w1_ds28e17 repeated_start=1 speed=0
+options w1_ds28e17 speed=0
 
 Setting up parameters on the kernel command line (boot options).
 
-... w1_ds28e17.repeated_start=1 w1_ds28e17.speed=0 ...
+... w1_ds28e17.speed=0 ...
 
 
 --- 4.2  Sysfs properties
@@ -550,7 +535,6 @@ drwxr-xr-x 4 root root    0 Jul  9 20:03 i2c-5
 -r--r--r-- 1 root root 4096 Jul  9 20:03 id
 -r--r--r-- 1 root root 4096 Jul  9 20:03 name
 drwxr-xr-x 2 root root    0 Jul  9 20:03 power
--rw-r--r-- 1 root root 4096 Jul  9 20:03 repeated_start
 -rw-r--r-- 1 root root 4096 Jul  9 20:03 speed
 -rw-r--r-- 1 root root 4096 Jul  9 20:03 stretch
 lrwxrwxrwx 1 root root    0 Jul  9 20:03 subsystem -> ../../../bus/w1
@@ -558,9 +542,9 @@ lrwxrwxrwx 1 root root    0 Jul  9 20:03 subsystem -> ../../../bus/w1
 
 driver, id, name, power, subsystem, and uevent are standard sysfs properties.
 
-The repeated_start, speed and stretch values are the current settings of the
-parameters described at section 4.1.1  Driver Parameters. You can tweak them
-individually for each DS28E17.
+The speed and stretch values are the current settings of the parameters
+described at section 4.1.1  Driver Parameters. You can tweak them individually
+for each DS28E17.
 
 i2c-5 is the name of the associated I2C master device node. If your udev daemon
 is set up to handle I2C buses (likely), you can find the DS28E17 I2C bus char

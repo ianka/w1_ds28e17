@@ -17,7 +17,7 @@
 #include <linux/i2c-dev.h>
 
 int main(int argc, char* argv[]) {
-	struct i2c_msg i2c_msgs[1];
+	struct i2c_msg i2c_msgs[2];
 	struct i2c_rdwr_ioctl_data i2c_transfer;
 	unsigned int address;
 	uint8_t rdata[2];
@@ -47,25 +47,13 @@ int main(int argc, char* argv[]) {
 	i2c_msgs[0].len    = 1;
 	i2c_msgs[0].buf    = "\x00";
 
-	i2c_transfer.msgs  = i2c_msgs;
-	i2c_transfer.nmsgs = 1;
-
-	if (ioctl(fd, I2C_RDWR, &i2c_transfer) < 0) {
-		perror("ds7505-readtemp: i2c temperature select");
-		return 2;
-	};
-
-	/* This is done in two separate transfers to ensure there is no repeated
-	 * start condition, as the DS7505 doesn't support that. */
-
-	/* Temperature read. */
-	i2c_msgs[0].addr   = address;
-	i2c_msgs[0].flags  = I2C_M_RD;
-	i2c_msgs[0].len    = 2;
-	i2c_msgs[0].buf    = (char*)&rdata;
+	i2c_msgs[1].addr   = address;
+	i2c_msgs[1].flags  = I2C_M_RD;
+	i2c_msgs[1].len    = 2;
+	i2c_msgs[1].buf    = (char*)&rdata;
 
 	i2c_transfer.msgs  = i2c_msgs;
-	i2c_transfer.nmsgs = 1;
+	i2c_transfer.nmsgs = 2;
 
 	if (ioctl(fd, I2C_RDWR, &i2c_transfer) < 0) {
 		perror("ds7505-readtemp: i2c temperature read");
