@@ -363,7 +363,7 @@ static int w1_f19_i2c_master_transfer(struct i2c_adapter *adapter,
 	if (w1_reset_select_slave(sl)) {
 		i = -ENXIO;
 		goto error;
-	}	
+	}
 
 	/* Loop while there are still messages to transfer. */
 	while (i < num) {
@@ -446,7 +446,7 @@ static int w1_f19_i2c_master_transfer(struct i2c_adapter *adapter,
 			if (w1_reset_resume_command(sl->master)) {
 				i = -ENXIO;
 				goto error;
-			}	
+			}
 		}
 	}
 
@@ -477,12 +477,21 @@ static u32 w1_f19_i2c_functionality(struct i2c_adapter *adapter)
 		I2C_FUNC_SMBUS_PEC;
 }
 
+
 /* I2C algorithm. */
 static const struct i2c_algorithm w1_f19_i2c_algorithm = {
 	.master_xfer    = w1_f19_i2c_master_transfer,
 	.smbus_xfer     = NULL,
 	.functionality  = w1_f19_i2c_functionality,
 };
+
+
+#ifdef I2C_AQ_COMB
+/* I2C adapter quirks. */
+static const struct i2c_adapter_quirks w1_f19_i2c_adapter_quirks = {
+	.max_read_len = W1_F19_READ_DATA_LIMIT,
+};
+#endif
 
 
 /* Read I2C speed from DS28E17. */
@@ -686,6 +695,9 @@ static int w1_f19_add_slave(struct w1_slave *sl)
 	strcpy(data->adapter.name, "w1-");
 	strcat(data->adapter.name, sl->name);
 	data->adapter.dev.parent = &sl->dev;
+#ifdef I2C_AQ_COMB
+	data->adapter.quirks     = &w1_f19_i2c_adapter_quirks;
+#endif
 
 	return i2c_add_adapter(&data->adapter);
 }
