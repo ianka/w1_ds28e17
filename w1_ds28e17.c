@@ -399,44 +399,41 @@ static int w1_f19_i2c_master_transfer(struct i2c_adapter *adapter,
 
 			/* Eat up read message, too. */
 			i++;
-		} else {
-			/* Simple transfers. */
-			if (msgs[i].flags & I2C_M_RD) {
-				/* Read transfer. */
-				result = w1_f19_i2c_read(sl, msgs[i].addr,
-					msgs[i].buf, msgs[i].len);
-				if (result < 0) {
-					i = result;
-					goto error;
-				}
+		} else if (msgs[i].flags & I2C_M_RD) {
+			/* Read transfer. */
+			result = w1_f19_i2c_read(sl, msgs[i].addr,
+				msgs[i].buf, msgs[i].len);
+			if (result < 0) {
+				i = result;
+				goto error;
+			}
 
-				/* Check if we should interpret the read data
-				 * as a length byte. The DS28E17 unfortunately
-				 * has no read without stop, so we can just do
-				 * another simple read in that case. */
-				if (msgs[i].flags & I2C_M_RECV_LEN) {
-					result = w1_f19_i2c_read(sl,
-						msgs[i].addr,
-						&(msgs[i].buf[1]),
-						msgs[i].buf[0]);
-					if (result < 0) {
-						i = result;
-						goto error;
-					}
-				}
-			}	else {
-				/* Write transfer.
-				 * Stop condition only for last
-				 * transfer. */
-				result = w1_f19_i2c_write(sl,
+			/* Check if we should interpret the read data
+			 * as a length byte. The DS28E17 unfortunately
+			 * has no read without stop, so we can just do
+			 * another simple read in that case. */
+			if (msgs[i].flags & I2C_M_RECV_LEN) {
+				result = w1_f19_i2c_read(sl,
 					msgs[i].addr,
-					msgs[i].buf,
-					msgs[i].len,
-					i == (num-1));
+					&(msgs[i].buf[1]),
+					msgs[i].buf[0]);
 				if (result < 0) {
 					i = result;
 					goto error;
 				}
+			}
+		} else {
+			/* Write transfer.
+			 * Stop condition only for last
+			 * transfer. */
+			result = w1_f19_i2c_write(sl,
+				msgs[i].addr,
+				msgs[i].buf,
+				msgs[i].len,
+				i == (num-1));
+			if (result < 0) {
+				i = result;
+				goto error;
 			}
 		}
 
