@@ -111,7 +111,7 @@ static int w1_f19_i2c_busy_wait(struct w1_slave *sl, size_t count)
 	}
 
 	/* Timeout. */
-	dev_warn(&sl->dev, "busy timeout.\n");
+	dev_warn(&sl->dev, "busy timeout\n");
 	return -EIO;
 }
 
@@ -148,14 +148,14 @@ static int __w1_f19_i2c_write(struct w1_slave *sl,
 
 	/* Warnings. */
 	if (w1_buf[0] & W1_F19_STATUS_CRC)
-		dev_warn(&sl->dev, "crc16 mismatch.\n");
+		dev_warn(&sl->dev, "crc16 mismatch\n");
 	if (w1_buf[0] & W1_F19_STATUS_ADDRESS)
-		dev_warn(&sl->dev, "i2c device not responding.\n");
+		dev_warn(&sl->dev, "i2c device not responding\n");
 	if (w1_buf[0] & W1_F19_STATUS_START)
-		dev_warn(&sl->dev, "i2c start condition invalid.\n");
+		dev_warn(&sl->dev, "i2c start condition invalid\n");
 	if ((w1_buf[0] & (W1_F19_STATUS_CRC | W1_F19_STATUS_ADDRESS)) == 0
 			&& w1_buf[1] != 0) {
-		dev_warn(&sl->dev, "i2c short write, %d bytes not acknowledged.\n",
+		dev_warn(&sl->dev, "i2c short write, %d bytes not acknowledged\n",
 			w1_buf[1]);
 	}
 
@@ -270,11 +270,11 @@ static int w1_f19_i2c_read(struct w1_slave *sl, u16 i2c_address,
 
 	/* Warnings. */
 	if (w1_buf[0] & W1_F19_STATUS_CRC)
-		dev_warn(&sl->dev, "crc16 mismatch.\n");
+		dev_warn(&sl->dev, "crc16 mismatch\n");
 	if (w1_buf[0] & W1_F19_STATUS_ADDRESS)
-		dev_warn(&sl->dev, "i2c device not responding.\n");
+		dev_warn(&sl->dev, "i2c device not responding\n");
 	if (w1_buf[0] & W1_F19_STATUS_START)
-		dev_warn(&sl->dev, "i2c start condition invalid.\n");
+		dev_warn(&sl->dev, "i2c start condition invalid\n");
 
 	/* Check error conditions. */
 	if (w1_buf[0] != 0)
@@ -324,14 +324,14 @@ static int w1_f19_i2c_write_read(struct w1_slave *sl, u16 i2c_address,
 
 	/* Warnings. */
 	if (w1_buf[0] & W1_F19_STATUS_CRC)
-		dev_warn(&sl->dev, "crc16 mismatch.\n");
+		dev_warn(&sl->dev, "crc16 mismatch\n");
 	if (w1_buf[0] & W1_F19_STATUS_ADDRESS)
-		dev_warn(&sl->dev, "i2c device not responding.\n");
+		dev_warn(&sl->dev, "i2c device not responding\n");
 	if (w1_buf[0] & W1_F19_STATUS_START)
-		dev_warn(&sl->dev, "i2c start condition invalid.\n");
+		dev_warn(&sl->dev, "i2c start condition invalid\n");
 	if ((w1_buf[0] & (W1_F19_STATUS_CRC | W1_F19_STATUS_ADDRESS)) == 0
 			&& w1_buf[1] != 0) {
-		dev_warn(&sl->dev, "i2c short write, %d bytes not acknowledged.\n",
+		dev_warn(&sl->dev, "i2c short write, %d bytes not acknowledged\n",
 			w1_buf[1]);
 	}
 
@@ -535,7 +535,7 @@ static int __w1_f19_set_i2c_speed(struct w1_slave *sl, u8 speed)
 	/* Update speed in slave specific data. */
 	data->speed = speed;
 
-	dev_info(&sl->dev, "i2c speed set to %d kBaud.\n", i2c_speeds[speed]);
+	dev_info(&sl->dev, "i2c speed set to %d kBaud\n", i2c_speeds[speed]);
 
 	return 0;
 }
