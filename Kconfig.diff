@@ -14,12 +14,12 @@ diff -urN linux-4.1.23.orig/drivers/w1/slaves/Kconfig linux-4.1.23/drivers/w1/sl
 +	  For each DS28E17 detected, a new I2C adapter is created within the
 +	  kernel. I2C devices on that bus can be configured to be used by the
 +	  kernel as on any other "native" I2C bus.
-+	  
++
 +	  In addition, that new I2C bus is accessible from userspace through
 +	  a /dev/i2c-nnn device node if you have enabled
 +	  "Device Drivers->I2C Support->I2C device interface" (CONFIG_I2C_CHARDEV).
 +
-+	  This driver is also available as a module. If so, the module 
++	  This driver is also available as a module. If so, the module
 +	  will be called w1_ds28e17.
 +
 +	  If you are unsure, say N.
