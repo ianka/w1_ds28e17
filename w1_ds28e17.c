@@ -18,8 +18,7 @@
 #include <linux/uaccess.h>
 #include <linux/i2c.h>
 
-#define CRC16_INIT		0
-#define CRC16_VALID		0xb001
+#define CRC16_INIT 0
 
 #include "../w1.h"
 #include "../w1_int.h"
