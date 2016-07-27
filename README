@@ -63,7 +63,7 @@ different from the ones your computer has built in, apart from some minor
 limitations introduced by the Onewire bus and the DS28E17 itself.
 
 
-=== 2  Understanding the DS28E17 
+=== 2  Understanding the DS28E17
 
 First, find the authoritative information about the DS28E17 on
 Dallas Semiconductor/Maxim Integrated's website:
@@ -79,19 +79,19 @@ circuits and user software.
 --- 2.1  Operation
 
 The DS28E17 controls the I2C autonomously, unburdening the host to do so
-itself. This includes Start Condition, slave addressing, sending out the
-buffered data at configured I2C speed, and finally Stop Condition. Same for
-receiving data. It hands over data from one bus to another through a 255 byte
-RAM buffer, first receiving all the data from one side, then sending it on the
-other. During the I2C transfer, the Onewire communication stops and
-vice versa.
+itself. This includes bus arbitration, Start Condition, slave addressing,
+sending out the buffered data at configured I2C speed, and finally Stop
+Condition. Same for receiving data. It hands over data from one bus to another
+through a 255 byte RAM buffer, first receiving all the data from one side, then
+sending it on the other. During the I2C transfer, the Onewire communication
+stops and vice versa.
 
 A typical transfer is like this:
 -------------------------------------------------------------------------------
 Starting on Onewire. The Onewire host writes the following.
 
 "Bus Reset"                             ____ (480µs low)
-"Presence Pulse"                        ____ (200µs low) (issued by all slaves)
+"Presence Pulse"                        ____ (>200µs low) (issued by all slaves)
 "Match ROM" bus command                 0x55
 DS28E17 slave address                   0x19 0x00 0x00 0x00 0x02 0xDB 0xD8 0x7B
 "Write Data with Stop" device command   0x4B
@@ -236,10 +236,10 @@ level-shifter circuit:
 |                \         G |     \
 |                /      –––––'     /
 |                \    ––– – –––    \
-|                |     |  ^  |     |  
+|                |     |  ^  |     |
 | 5V bus line ---+-----'  '--+-----+---- 3.3V bus line
 |                      D     S
-|                        
+|
 
 The transistor is a small signal N-channel enhancement mode MOSFET, e.g. a
 2N7000, BS170 or MMBF170. The value of the two pullup resistors depend on the
@@ -322,7 +322,7 @@ Start the ncurses based configuration program.
 
 Check "Device Drivers->I2C Support". If you want your new DS28E17 based I2C
 bus to be accessible from user space (likely), you also have to check "Device
-Drivers->I2C Support->I2C device interface". 
+Drivers->I2C Support->I2C device interface".
 
 Check "Device Drivers->Dallas's 1-wire support".You may want "Device
 Drivers->Dallas's 1-wire support->Userspace communication over connector" to be
@@ -399,7 +399,7 @@ likely your system will not boot anymore.
 +++ 3.2.6  Installing additional driver modules
 
 This is straightforward as with the "w1_ds28e17" driver.
- 
+
 If you had to select the i2c subsystem, you now have to build and install the
 driver modules selected.
 
@@ -452,7 +452,7 @@ your DS28E17 (likely), you need the "i2c-dev" driver, too.
 
 # modprobe i2c-dev
 
-Check the kernel log with 
+Check the kernel log with
 
 # dmesg | tail
 ...
@@ -472,14 +472,13 @@ command line. These are:
 
 speed:
 	This sets up the default I2C speed a DS28E17 get configured for as soon
-	it is connected. 0 means 100kBaud, 1 means 400kBaud, 2 means 900kBaud and any
-	other value from 3..255 means "do not set on connect". The power-on default
-	of the DS28E17 is 400kBaud, but chips may come and go on the Onewire bus
-	without being de-powered and as soon the "w1_ds28e17" driver notices a
-	freshly connected, or reconnected DS28E17 device on the Onewire bus, it will
-	re-apply this setting.
+	it is connected. The power-on default	of the DS28E17 is 400kBaud, but chips
+	may come and go on the Onewire bus without being de-powered and as soon
+	the "w1_ds28e17" driver notices a freshly connected, or reconnected
+	DS28E17 device on the Onewire bus, it will re-apply this setting.
 
-	The default is 1.
+	Valid values are 100, 400, 900 [kBaud]. Any other value means to leave alone
+	the current DS28E17 setting on detect. The default value is 100.
 
 stretch:
 	This sets up the default stretch value used for freshly connected DS28E17
@@ -489,22 +488,22 @@ stretch:
 	cannot be pre-calculated correctly. As the w1_ds28e17 driver checks the
 	DS28E17's busy flag in a loop after the precalculated wait time, it should be
 	hardly needed to tweak this setting.
-	
-	Leave it at 1 unless you get EIO errors and a "w1_slave_driver
+
+	Leave it at 1 unless you get ETIMEDOUT errors and a "w1_slave_driver
 	19-00000002dbd8: busy timeout" in the kernel log.
 
 	Valid values are 1 to 9. The default is 1.
 
 Setting up parameters with insmod:
 
-# insmod /lib/modules/$(uname -r)/kernel/drivers/w1/slaves/w1_ds28e17 speed=0
+# insmod /lib/modules/$(uname -r)/kernel/drivers/w1/slaves/w1_ds28e17 speed=400
 Setting up parameters for use with modprobe: create a file in /etc/modprobe.d/ containing
 
-options w1_ds28e17 speed=0
+options w1_ds28e17 speed=400
 
 Setting up parameters on the kernel command line (boot options).
 
-... w1_ds28e17.speed=0 ...
+... w1_ds28e17.speed=400 ...
 
 
 --- 4.2  Sysfs properties
@@ -597,7 +596,7 @@ which is created from the factory id number of the DS28E17.
 The DS28E17 evaluation kit as offered from Maxim has a DS7505 I2C temperature
 sensor chip on the same board as the DS28E17. You can play with that chip to
 get a feeling how to deal with the DS28E17 and I2C. There are some sample
-userspace test programs for the DS7505 chip in the driver source directory. 
+userspace test programs for the DS7505 chip in the driver source directory.
 
 [~]$ cd w1_ds28e17-master
 [~/w1_ds28e17-master]$ make

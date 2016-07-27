@@ -1,7 +1,8 @@
-diff -urN linux-4.1.23.orig/drivers/w1/slaves/Kconfig linux-4.1.23/drivers/w1/slaves/Kconfig
---- linux-4.1.23.orig/drivers/w1/slaves/Kconfig	2016-04-25 17:57:36.000000000 +0200
-+++ linux-4.1.23/drivers/w1/slaves/Kconfig	2016-07-08 21:44:29.843301655 +0200
-@@ -126,6 +126,25 @@
+diff --git a/drivers/w1/slaves/Kconfig b/drivers/w1/slaves/Kconfig
+index cfe74d0..c7ffe25 100644
+--- a/drivers/w1/slaves/Kconfig
++++ b/drivers/w1/slaves/Kconfig
+@@ -126,6 +126,21 @@ config W1_SLAVE_DS28E04
  
  	  If you are unsure, say N.
  
@@ -13,11 +14,7 @@ diff -urN linux-4.1.23.orig/drivers/w1/slaves/Kconfig linux-4.1.23/drivers/w1/sl
 +	  Say Y here if you want to use the DS28E17 1-wire-to-I2C master bridge.
 +	  For each DS28E17 detected, a new I2C adapter is created within the
 +	  kernel. I2C devices on that bus can be configured to be used by the
-+	  kernel as on any other "native" I2C bus.
-+
-+	  In addition, that new I2C bus is accessible from userspace through
-+	  a /dev/i2c-nnn device node if you have enabled
-+	  "Device Drivers->I2C Support->I2C device interface" (CONFIG_I2C_CHARDEV).
++	  kernel and userspace tools as on any other "native" I2C bus.
 +
 +	  This driver is also available as a module. If so, the module
 +	  will be called w1_ds28e17.

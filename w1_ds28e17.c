@@ -7,16 +7,16 @@
  * Version 2. See the file COPYING for more details.
  */
 
+#include <linux/crc16.h>
+#include <linux/delay.h>
+#include <linux/device.h>
+#include <linux/i2c.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
-#include <linux/device.h>
-#include <linux/types.h>
-#include <linux/delay.h>
 #include <linux/slab.h>
-#include <linux/crc16.h>
+#include <linux/types.h>
 #include <linux/uaccess.h>
-#include <linux/i2c.h>
 
 #define CRC16_INIT 0
 
@@ -26,15 +26,15 @@
 
 
 /* Module setup. */
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Jan Kandziora <jjj@gmx.de>");
 MODULE_DESCRIPTION("w1 family 19 driver for DS28E17, 1-wire to I2C master bridge");
 MODULE_ALIAS("w1-family-" __stringify(W1_FAMILY_DS28E17));
 
 
 /* Default I2C speed to be set when a DS28E17 is detected. */
-static char i2c_speed = 1;
-module_param_named(speed, i2c_speed, byte, (S_IRUSR | S_IWUSR));
+static int i2c_speed = 100;
+module_param_named(speed, i2c_speed, int, (S_IRUSR | S_IWUSR));
 MODULE_PARM_DESC(speed, "Default I2C speed to be set when a DS28E17 is detected");
 
 /* Default I2C stretch value to be set when a DS28E17 is detected. */
@@ -68,7 +68,7 @@ MODULE_PARM_DESC(stretch, "Default I2C stretch value to be set when a DS28E17 is
 /* Maximum number of I2C bytes to read with one onewire command. */
 #define W1_F19_READ_DATA_LIMIT 255
 
-/* Contants for calculating the busy sleep. */
+/* Constants for calculating the busy sleep. */
 #define W1_F19_BUSY_TIMEBASES { 90, 23, 10 }
 #define W1_F19_BUSY_GRATUITY  1000
 
@@ -117,7 +117,34 @@ static int w1_f19_i2c_busy_wait(struct w1_slave *sl, size_t count)
 
 	/* Timeout. */
 	dev_warn(&sl->dev, "busy timeout\n");
-	return -EIO;
+	return -ETIMEDOUT;
+}
+
+
+/* Utility function: result. */
+static size_t w1_f19_error(struct w1_slave *sl, u8 w1_buf[])
+{
+	/* Warnings. */
+	if (w1_buf[0] & W1_F19_STATUS_CRC)
+		dev_warn(&sl->dev, "crc16 mismatch\n");
+	if (w1_buf[0] & W1_F19_STATUS_ADDRESS)
+		dev_warn(&sl->dev, "i2c device not responding\n");
+	if ((w1_buf[0] & (W1_F19_STATUS_CRC | W1_F19_STATUS_ADDRESS)) == 0
+			&& w1_buf[1] != 0) {
+		dev_warn(&sl->dev, "i2c short write, %d bytes not acknowledged\n",
+			w1_buf[1]);
+	}
+
+	/* Check error conditions. */
+	if (w1_buf[0] & W1_F19_STATUS_ADDRESS)
+		return -ENXIO;
+	if (w1_buf[0] & W1_F19_STATUS_START)
+		return -EAGAIN;
+	if (w1_buf[0] != 0 || w1_buf[1] != 0)
+		return -EIO;
+
+	/* All ok. */
+	return 0;
 }
 
 
@@ -127,6 +154,7 @@ static int __w1_f19_i2c_write(struct w1_slave *sl,
 	const u8 *buffer, size_t count)
 {
 	u16 crc;
+	int error;
 	u8 w1_buf[2];
 
 	/* Send command and I2C data to DS28E17. */
@@ -146,29 +174,17 @@ static int __w1_f19_i2c_write(struct w1_slave *sl,
 
 	/* Wait until busy flag clears (or timeout). */
 	if (w1_f19_i2c_busy_wait(sl, count + 1) < 0)
-		return -EIO;
+		return -ETIMEDOUT;
 
 	/* Read status from DS28E17. */
 	w1_read_block(sl->master, w1_buf, 2);
 
-	/* Warnings. */
-	if (w1_buf[0] & W1_F19_STATUS_CRC)
-		dev_warn(&sl->dev, "crc16 mismatch\n");
-	if (w1_buf[0] & W1_F19_STATUS_ADDRESS)
-		dev_warn(&sl->dev, "i2c device not responding\n");
-	if (w1_buf[0] & W1_F19_STATUS_START)
-		dev_warn(&sl->dev, "i2c start condition invalid\n");
-	if ((w1_buf[0] & (W1_F19_STATUS_CRC | W1_F19_STATUS_ADDRESS)) == 0
-			&& w1_buf[1] != 0) {
-		dev_warn(&sl->dev, "i2c short write, %d bytes not acknowledged\n",
-			w1_buf[1]);
-	}
-
 	/* Check error conditions. */
-	if (w1_buf[0] != 0 || w1_buf[1] != 0)
-		return -EIO;
+	error = w1_f19_error(sl, w1_buf);
+	if (error < 0)
+		return error;
 
-	/* All ok. */
+	/* Return number of bytes written. */
 	return count;
 }
 
@@ -183,9 +199,8 @@ static int w1_f19_i2c_write(struct w1_slave *sl, u16 i2c_address,
 	u8 command[2];
 
 	/* Check input. */
-	if (i2c_address > 0x7F
-			|| count == 0)
-		return 0;
+	if (count == 0)
+		return -EOPNOTSUPP;
 
 	/* Check whether we need multiple commands. */
 	if (count <= W1_F19_WRITE_DATA_LIMIT) {
@@ -213,7 +228,7 @@ static int w1_f19_i2c_write(struct w1_slave *sl, u16 i2c_address,
 
 		/* Resume to same DS28E17. */
 		if (w1_reset_resume_command(sl->master))
-			return -ENXIO;
+			return -EIO;
 
 		/* Next data chunk. */
 		p += W1_F19_WRITE_DATA_LIMIT;
@@ -229,7 +244,7 @@ static int w1_f19_i2c_write(struct w1_slave *sl, u16 i2c_address,
 
 			/* Resume to same DS28E17. */
 			if (w1_reset_resume_command(sl->master))
-				return -ENXIO;
+				return -EIO;
 
 			/* Next data chunk. */
 			p += W1_F19_WRITE_DATA_LIMIT;
@@ -251,13 +266,16 @@ static int w1_f19_i2c_read(struct w1_slave *sl, u16 i2c_address,
 	u8 *buffer, size_t count)
 {
 	u16 crc;
+	int error;
 	u8 w1_buf[5];
 
 	/* Check input. */
-	if (i2c_address > 0x7F
-			|| count > W1_F19_READ_DATA_LIMIT
-			|| count == 0)
-		return -EINVAL;
+	if (count == 0)
+		return -EOPNOTSUPP;
+#ifndef I2C_AQ_COMB
+	if (count > W1_F19_READ_DATA_LIMIT)
+		return -EOPNOTSUPP;
+#endif
 
 	/* Send command to DS28E17. */
 	w1_buf[0] = W1_F19_READ_DATA_WITH_STOP;
@@ -270,22 +288,16 @@ static int w1_f19_i2c_read(struct w1_slave *sl, u16 i2c_address,
 
 	/* Wait until busy flag clears (or timeout). */
 	if (w1_f19_i2c_busy_wait(sl, count + 1) < 0)
-		return -EIO;
+		return -ETIMEDOUT;
 
 	/* Read status from DS28E17. */
 	w1_buf[0] = w1_read_8(sl->master);
-
-	/* Warnings. */
-	if (w1_buf[0] & W1_F19_STATUS_CRC)
-		dev_warn(&sl->dev, "crc16 mismatch\n");
-	if (w1_buf[0] & W1_F19_STATUS_ADDRESS)
-		dev_warn(&sl->dev, "i2c device not responding\n");
-	if (w1_buf[0] & W1_F19_STATUS_START)
-		dev_warn(&sl->dev, "i2c start condition invalid\n");
+	w1_buf[1] = 0;
 
 	/* Check error conditions. */
-	if (w1_buf[0] != 0)
-		return -EIO;
+	error = w1_f19_error(sl, w1_buf);
+	if (error < 0)
+		return error;
 
 	/* Read received I2C data from DS28E17. */
 	return w1_read_block(sl->master, buffer, count);
@@ -297,14 +309,16 @@ static int w1_f19_i2c_write_read(struct w1_slave *sl, u16 i2c_address,
 	const u8 *wbuffer, size_t wcount, u8 *rbuffer, size_t rcount)
 {
 	u16 crc;
+	int error;
 	u8 w1_buf[3];
 
 	/* Check input. */
-	if (i2c_address > 0x7F
-			|| wcount == 0
-			|| rcount > W1_F19_READ_DATA_LIMIT
-			|| rcount == 0)
-		return -EINVAL;
+	if (wcount == 0 || rcount == 0)
+		return -EOPNOTSUPP;
+#ifndef I2C_AQ_COMB
+	if (rcount > W1_F19_READ_DATA_LIMIT)
+		return -EOPNOTSUPP;
+#endif
 
 	/* Send command and I2C data to DS28E17. */
 	w1_buf[0] = W1_F19_WRITE_READ_DATA_WITH_STOP;
@@ -324,27 +338,15 @@ static int w1_f19_i2c_write_read(struct w1_slave *sl, u16 i2c_address,
 
 	/* Wait until busy flag clears (or timeout). */
 	if (w1_f19_i2c_busy_wait(sl, wcount + rcount + 2) < 0)
-		return -EIO;
+		return -ETIMEDOUT;
 
 	/* Read status from DS28E17. */
 	w1_read_block(sl->master, w1_buf, 2);
 
-	/* Warnings. */
-	if (w1_buf[0] & W1_F19_STATUS_CRC)
-		dev_warn(&sl->dev, "crc16 mismatch\n");
-	if (w1_buf[0] & W1_F19_STATUS_ADDRESS)
-		dev_warn(&sl->dev, "i2c device not responding\n");
-	if (w1_buf[0] & W1_F19_STATUS_START)
-		dev_warn(&sl->dev, "i2c start condition invalid\n");
-	if ((w1_buf[0] & (W1_F19_STATUS_CRC | W1_F19_STATUS_ADDRESS)) == 0
-			&& w1_buf[1] != 0) {
-		dev_warn(&sl->dev, "i2c short write, %d bytes not acknowledged\n",
-			w1_buf[1]);
-	}
-
 	/* Check error conditions. */
-	if (w1_buf[0] != 0 || w1_buf[1] != 0)
-		return -EIO;
+	error = w1_f19_error(sl, w1_buf);
+	if (error < 0)
+		return error;
 
 	/* Read received I2C data from DS28E17. */
 	return w1_read_block(sl->master, rbuffer, rcount);
@@ -359,16 +361,12 @@ static int w1_f19_i2c_master_transfer(struct i2c_adapter *adapter,
 	int i = 0;
 	int result = 0;
 
-	/* Return if no messages to send/receive. */
-	if (num == 0)
-		return 0;
-
 	/* Start onewire transaction. */
 	mutex_lock(&sl->master->bus_mutex);
 
 	/* Select DS28E17. */
 	if (w1_reset_select_slave(sl)) {
-		i = -ENXIO;
+		i = -EIO;
 		goto error;
 	}
 
@@ -461,7 +459,7 @@ static int w1_f19_i2c_master_transfer(struct i2c_adapter *adapter,
 		if (i < num) {
 			/* Yes. Resume to same DS28E17. */
 			if (w1_reset_resume_command(sl->master)) {
-				i = -ENXIO;
+				i = -EIO;
 				goto error;
 			}
 		}
@@ -497,27 +495,28 @@ static u32 w1_f19_i2c_functionality(struct i2c_adapter *adapter)
 }
 
 
-/* I2C algorithm. */
-static const struct i2c_algorithm w1_f19_i2c_algorithm = {
-	.master_xfer    = w1_f19_i2c_master_transfer,
-	.smbus_xfer     = NULL,
-	.functionality  = w1_f19_i2c_functionality,
-};
-
-
-#ifdef I2C_AQ_COMB
 /* I2C adapter quirks. */
+#ifdef I2C_AQ_COMB
 static const struct i2c_adapter_quirks w1_f19_i2c_adapter_quirks = {
 	.max_read_len = W1_F19_READ_DATA_LIMIT,
 };
 #endif
+
+/* I2C algorithm. */
+static const struct i2c_algorithm w1_f19_i2c_algorithm = {
+	.master_xfer    = w1_f19_i2c_master_transfer,
+	.functionality  = w1_f19_i2c_functionality,
+#ifdef I2C_AQ_COMB
+	.quirks         = &w1_f19_i2c_adapter_quirks,
+#endif
+};
 
 
 /* Read I2C speed from DS28E17. */
 static int w1_f19_get_i2c_speed(struct w1_slave *sl)
 {
 	struct w1_f19_data *data = sl->family_data;
-	int result = -ENXIO;
+	int result = -EIO;
 
 	/* Start onewire transaction. */
 	mutex_lock(&sl->master->bus_mutex);
@@ -554,7 +553,7 @@ static int __w1_f19_set_i2c_speed(struct w1_slave *sl, u8 speed)
 
 	/* Select slave. */
 	if (w1_reset_select_slave(sl))
-		return -ENXIO;
+		return -EIO;
 
 	w1_buf[0] = W1_F19_WRITE_CONFIGURATION;
 	w1_buf[1] = speed;
@@ -609,16 +608,29 @@ static ssize_t speed_store(struct device *dev, struct device_attribute *attr,
 	struct w1_slave *sl = dev_to_w1_slave(dev);
 	int error;
 
-	/* Valid values are: '0' (100kHz), '1' (400kHz), '2' (900kHz) */
-	if (count < 1 || count > 2 || !buf)
+	/* Valid values are: "100", "400", "900" */
+	if (count < 3 || count > 4 || !buf)
 		return -EINVAL;
-	if (count == 2 && buf[1] != '\n')
+	if (count == 4 && buf[3] != '\n')
 		return -EINVAL;
-	if (buf[0] != '0' && buf[0] != '1' && buf[0] != '2')
+	if (buf[1] != '0' || buf[2] != '0')
 		return -EINVAL;
 
 	/* Set speed on slave. */
-	error = w1_f19_set_i2c_speed(sl, buf[0] & 0x03);
+	switch (buf[0]) {
+	case '1':
+		error = w1_f19_set_i2c_speed(sl, 0);
+		break;
+	case '4':
+		error = w1_f19_set_i2c_speed(sl, 1);
+		break;
+	case '9':
+		error = w1_f19_set_i2c_speed(sl, 2);
+		break;
+	default:
+		return -EINVAL;
+	}
+
 	if (error < 0)
 		return error;
 
@@ -687,19 +699,28 @@ static int w1_f19_add_slave(struct w1_slave *sl)
 	struct w1_f19_data *data = NULL;
 
 	/* Allocate memory for slave specific data. */
-	data = kzalloc(sizeof(*data), GFP_KERNEL);
+	data = devm_kzalloc(&sl->dev, sizeof(*data), GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
 	sl->family_data = data;
 
 	/* Setup default I2C speed on slave. */
-	if (i2c_speed == 0 || i2c_speed == 1 || i2c_speed == 2) {
-		__w1_f19_set_i2c_speed(sl, i2c_speed);
-	}	else {
+	switch (i2c_speed) {
+	case 100:
+		__w1_f19_set_i2c_speed(sl, 0);
+		break;
+	case 400:
+		__w1_f19_set_i2c_speed(sl, 1);
+		break;
+	case 900:
+		__w1_f19_set_i2c_speed(sl, 2);
+		break;
+	default:
 		/*
-		 * A module parameter of anything else than 0, 1, 2
-		 * means not to touch the speed of the DS28E17.
-		 * We assume 400kBaud.
+		 * A i2c_speed module parameter of anything else
+		 * than 100, 400, 900 means not to touch the
+		 * speed of the DS28E17.
+		 * We assume 400kBaud, the power-on value.
 		 */
 		data->speed = 1;
 	}
@@ -712,26 +733,24 @@ static int w1_f19_add_slave(struct w1_slave *sl)
 
 	/* Setup I2C adapter. */
 	data->adapter.owner      = THIS_MODULE;
-	data->adapter.class      = 0;
 	data->adapter.algo       = &w1_f19_i2c_algorithm;
-	data->adapter.algo_data  = (void *) sl;
+	data->adapter.algo_data  = sl;
 	strcpy(data->adapter.name, "w1-");
 	strcat(data->adapter.name, sl->name);
 	data->adapter.dev.parent = &sl->dev;
-#ifdef I2C_AQ_COMB
-	data->adapter.quirks     = &w1_f19_i2c_adapter_quirks;
-#endif
 
 	return i2c_add_adapter(&data->adapter);
 }
 
 static void w1_f19_remove_slave(struct w1_slave *sl)
 {
+	struct w1_f19_data *family_data = sl->family_data;
+
 	/* Delete I2C adapter. */
-	i2c_del_adapter(&(((struct w1_f19_data *)(sl->family_data))->adapter));
+	i2c_del_adapter(&family_data->adapter);
 
 	/* Free slave specific data. */
-	kfree(sl->family_data);
+	devm_kfree(&sl->dev, family_data);
 	sl->family_data = NULL;
 }
 
