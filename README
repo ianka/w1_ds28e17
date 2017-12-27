@@ -1,3 +1,7 @@
+NOTE: Since Linux-v4.15-rc1, this driver is included in the mainline kernel.
+
+
+
 w1_ds28e17 README
 
 This document describes the w1_ds28e17 Linux kernel driver, how to build it,
